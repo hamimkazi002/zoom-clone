@@ -90,12 +90,63 @@ function verifyPassword(password, room) {
   );
 }
 
+
 function leaveRoom(socket) {
   const room = getRoom(socket);
+
   if (!room) {
     socket.data.roomId = null;
     return;
   }
+
+  const member = room.members.get(socket.id);
+  const isHost = member?.role === "host";
+
+  // Host leaves: end meeting for everyone
+  if (isHost) {
+    const allUsers = [
+      ...room.members.keys(),
+      ...room.waiting.keys()
+    ];
+
+    for (const userId of allUsers) {
+      const userSocket = io.sockets.sockets.get(userId);
+
+      if (userSocket) {
+        userSocket.data.roomId = null;
+        userSocket.leave(room.id);
+
+        if (userId !== socket.id) {
+          io.to(userId).emit("meeting-ended");
+        }
+      }
+    }
+
+    room.members.clear();
+    room.waiting.clear();
+    rooms.delete(room.id);
+
+    console.log("Meeting ended by host:", room.id);
+    return;
+  }
+
+  // Normal participant or waiting user leaves
+  const wasMember = room.members.has(socket.id);
+
+  room.members.delete(socket.id);
+  room.waiting.delete(socket.id);
+
+  socket.leave(room.id);
+  socket.data.roomId = null;
+
+  if (wasMember) {
+    socket.to(room.id).emit("user-left", socket.id);
+  }
+
+  updateParticipants(room);
+  updateWaiting(room);
+}
+
 
   const wasMember = room.members.has(socket.id);
 
