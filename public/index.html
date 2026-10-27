@@ -1,0 +1,151 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MeetSpace | Video Meetings</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <h1>MeetSpace</h1>
+    <div id="userInfo">Not signed in</div>
+  </header>
+
+  <main class="container">
+
+    <!-- Login Section -->
+    <section id="loginSection" class="panel">
+      <h2>Welcome to MeetSpace</h2>
+      <p>Sign in to create or join a meeting.</p>
+
+      <div id="googleLogin"></div>
+
+      <div id="devLogin">
+        <input
+          type="text"
+          id="displayName"
+          placeholder="Enter your name"
+          maxlength="60"
+        >
+        <button id="loginBtn">Continue</button>
+      </div>
+    </section>
+
+    <!-- Meeting Home -->
+    <section id="homeSection" class="panel" hidden>
+      <h2>Start or Join a Meeting</h2>
+
+      <div class="meeting-options">
+        <div class="option-card">
+          <h3>Create Meeting</h3>
+          <p>Create a secure meeting with a password.</p>
+
+          <input
+            id="createPassword"
+            type="password"
+            placeholder="Set meeting password"
+            minlength="4"
+            maxlength="64"
+          >
+
+          <button id="createBtn">Create Meeting</button>
+        </div>
+
+        <div class="option-card">
+          <h3>Join Meeting</h3>
+          <p>Enter the Meeting ID and password.</p>
+
+          <input
+            id="roomInput"
+            type="text"
+            placeholder="Meeting ID"
+          >
+
+          <input
+            id="joinPassword"
+            type="password"
+            placeholder="Meeting Password"
+          >
+
+          <button id="joinBtn">Request to Join</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Waiting Room -->
+    <section id="waitingSection" class="panel" hidden>
+      <h2>Waiting for Host Approval</h2>
+      <p>
+        Your request has been sent.
+        The host must approve you before you can join.
+      </p>
+
+      <div class="loader"></div>
+
+      <button id="cancelWaitingBtn" class="danger">
+        Cancel Request
+      </button>
+    </section>
+
+    <!-- Active Meeting -->
+    <section id="meetingSection" hidden>
+
+      <div class="meeting-header panel">
+        <div>
+          <h2>Meeting Room</h2>
+          <p>Meeting ID: <strong id="roomText"></strong></p>
+          <p id="roleText">Role: Participant</p>
+        </div>
+
+        <div>
+          <button id="copyBtn">Copy Invite Link</button>
+        </div>
+      </div>
+
+      <div class="meeting-layout">
+
+        <div class="video-area">
+          <div id="videoGrid" class="video-grid"></div>
+        </div>
+
+        <aside class="sidebar panel">
+          <h3>Participants</h3>
+          <div id="participantList"></div>
+
+          <div id="hostPanel" hidden>
+            <hr>
+            <h3>Waiting Room</h3>
+            <div id="waitingList">
+              <p>No pending requests</p>
+            </div>
+          </div>
+        </aside>
+
+      </div>
+
+      <div class="meeting-controls">
+        <button id="micBtn">Mute Mic</button>
+        <button id="cameraBtn">Turn Camera Off</button>
+        <button id="screenBtn">Share Screen</button>
+        <button id="leaveBtn" class="danger">
+          Leave Meeting
+        </button>
+      </div>
+
+    </section>
+
+    <p id="status" role="status" aria-live="polite">
+      Welcome to MeetSpace.
+    </p>
+
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="/script.js"></script>
+
+</body>
+</html>

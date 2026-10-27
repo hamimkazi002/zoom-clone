@@ -1,0 +1,395 @@
+
+:root {
+  color-scheme: dark;
+  --bg: #0b1020;
+  --surface: #151d30;
+  --surface-alt: #1e2940;
+  --primary: #4778f5;
+  --primary-hover: #3565df;
+  --text: #f6f8ff;
+  --muted: #aab7d0;
+  --border: #303c54;
+  --danger: #df4354;
+  --success: #27bb8b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.topbar {
+  min-height: 74px;
+  padding: 18px 5%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 25px;
+  letter-spacing: -0.6px;
+}
+
+#userInfo {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+
+.panel {
+  padding: 26px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 16px;
+}
+
+#loginSection {
+  max-width: 440px;
+  margin: 55px auto;
+  text-align: center;
+}
+
+#loginSection h2 {
+  margin-top: 0;
+}
+
+#loginSection p,
+.option-card p,
+#waitingSection p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+#devLogin {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+#googleLogin {
+  display: flex;
+  justify-content: center;
+  margin-top: 22px;
+}
+
+input {
+  width: 100%;
+  padding: 14px 15px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: none;
+  background: #0e1525;
+  color: white;
+  font-size: 15px;
+}
+
+input:focus {
+  border-color: var(--primary);
+}
+
+button {
+  padding: 12px 18px;
+  border: none;
+  border-radius: 9px;
+  background: var(--primary);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+button:hover {
+  background: var(--primary-hover);
+}
+
+button:active {
+  transform: scale(0.98);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.danger {
+  background: var(--danger);
+}
+
+button.danger:hover {
+  background: #bf3243;
+}
+
+#homeSection {
+  max-width: 900px;
+  margin: 35px auto;
+}
+
+#homeSection > h2 {
+  text-align: center;
+  margin-top: 0;
+  margin-bottom: 26px;
+}
+
+.meeting-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.option-card {
+  padding: 25px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.option-card h3,
+.option-card p {
+  margin: 0;
+}
+
+.option-card button {
+  margin-top: auto;
+}
+
+#waitingSection {
+  max-width: 550px;
+  margin: 60px auto;
+  text-align: center;
+}
+
+.loader {
+  width: 45px;
+  height: 45px;
+  margin: 28px auto;
+  border: 4px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.meeting-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.meeting-header h2 {
+  margin: 0 0 12px;
+}
+
+.meeting-header p {
+  margin: 7px 0;
+  color: var(--muted);
+}
+
+.meeting-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  gap: 18px;
+  align-items: start;
+}
+
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+}
+
+.video-box {
+  position: relative;
+  min-height: 190px;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: #242d40;
+}
+
+.video-box video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #242d40;
+}
+
+.video-box .video-label {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  max-width: calc(100% - 24px);
+  padding: 7px 11px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar {
+  min-height: 250px;
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+.sidebar h3 {
+  margin-top: 0;
+}
+
+.sidebar hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 24px 0;
+}
+
+.participant-item,
+.waiting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.participant-details {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.participant-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.participant-role {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.participant-actions,
+.waiting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.participant-actions button,
+.waiting-actions button {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.meeting-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  padding: 22px;
+  margin-top: 20px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--surface);
+}
+
+#status {
+  margin: 22px auto;
+  text-align: center;
+  color: #93c5fd;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+@media (min-width: 1100px) {
+  .video-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 850px) {
+  .meeting-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    max-height: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .container {
+    padding: 20px 12px;
+  }
+
+  .panel {
+    padding: 19px;
+  }
+
+  .meeting-options {
+    grid-template-columns: 1fr;
+  }
+
+  .meeting-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .video-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .meeting-controls {
+    padding: 12px;
+    gap: 9px;
+  }
+
+  .meeting-controls button {
+    flex: 1 1 135px;
+  }
+
+  .topbar {
+    padding: 17px;
+  }
+}
