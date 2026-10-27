@@ -190,7 +190,7 @@ function leaveRoom(socket) {
 
   updateParticipants(room);
   updateWaiting(room);
-}
+
 
 io.use(async (socket, next) => {
   try {
