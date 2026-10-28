@@ -1,24 +1,29 @@
 
 /* ==========================================
-   MeetSpace - Complete Frontend JavaScript
-   Firebase + Video + Public/Private Chat
+   MEETSPACE - FRONTEND APPLICATION
+   Firebase Login + WebRTC + Socket.IO
+   Meetings + Participants + Private Chat
 ========================================== */
 
-const $ = id => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
 const socket = io({
   autoConnect: false,
   reconnection: false
 });
 
+let currentUser = null;
 let currentRoom = null;
 let currentRole = null;
-let currentUser = null;
+
 let localStream = null;
 let screenStream = null;
+
 let participants = [];
+let isLeaving = false;
 
 const peers = new Map();
+const remoteStreams = new Map();
 const candidateQueues = new Map();
 
 const rtcConfig = {
@@ -29,35 +34,52 @@ const rtcConfig = {
 };
 
 /* ==========================================
-   BASIC FUNCTIONS
+   STATUS AND PAGE DISPLAY
 ========================================== */
 
 function status(message) {
-  $("status").textContent = message;
+  const element = $("status");
+  if (element) element.textContent = message;
 }
 
 function showSection(sectionId) {
-  [
+  const sections = [
     "loginSection",
     "homeSection",
     "waitingSection",
     "meetingSection"
-  ].forEach(id => {
-    $(id).hidden = id !== sectionId;
+  ];
+
+  sections.forEach((id) => {
+    const section = $(id);
+    if (section) section.hidden = id !== sectionId;
   });
 }
 
+/* ==========================================
+   SERVER REQUEST HELPER
+========================================== */
+
 function request(eventName, data) {
   return new Promise((resolve, reject) => {
+    if (!socket.connected) {
+      reject(new Error("Server is not connected."));
+      return;
+    }
+
     socket.timeout(10000).emit(
       eventName,
       data,
       (error, response) => {
         if (error) {
-          reject(new Error("Server did not respond"));
-        } else {
-          resolve(response);
+          reject(new Error("Server did not respond."));
+          return;
         }
+
+        resolve(response || {
+          ok: false,
+          error: "Unknown server response."
+        });
       }
     );
   });
@@ -74,13 +96,185 @@ async function waitForFirebase() {
       return window.meetspaceAuth;
     }
 
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
   }
 
   throw new Error(
-    "Firebase failed to load. Check Firebase configuration."
+    "Firebase authentication could not be loaded."
   );
 }
+
+function setUser(name, firebaseUser) {
+  currentUser = {
+    uid: firebaseUser.uid,
+    name: name,
+    email: firebaseUser.email || null,
+    isGuest: firebaseUser.isAnonymous
+  };
+
+  $("userInfo").textContent =
+    name + (firebaseUser.isAnonymous ? " (Guest)" : "");
+
+  showSection("homeSection");
+
+  status("Signed in as " + name);
+}
+
+function savedGuestName(uid) {
+  try {
+    return localStorage.getItem(
+      "meetspace-guest-name-" + uid
+    );
+  } catch {
+    return null;
+  }
+}
+
+/* Google Login */
+
+$("googleLoginBtn").addEventListener(
+  "click",
+  async () => {
+    const button = $("googleLoginBtn");
+    button.disabled = true;
+
+    try {
+      status("Signing in with Google...");
+
+      const firebase = await waitForFirebase();
+
+      const user = await firebase.loginWithGoogle();
+
+      setUser(
+        user.displayName ||
+        user.email ||
+        "Google User",
+        user
+      );
+
+    } catch (error) {
+      console.error("Google login:", error);
+
+      status(
+        "Google sign-in failed: " + error.message
+      );
+
+    } finally {
+      button.disabled = false;
+    }
+  }
+);
+
+/* Show Guest Name Input */
+
+$("guestLoginBtn").addEventListener("click", () => {
+  $("guestNameSection").hidden = false;
+  $("guestName").focus();
+});
+
+/* Guest Login */
+
+$("guestContinueBtn").addEventListener(
+  "click",
+  async () => {
+    const name = $("guestName").value.trim();
+
+    if (!name) {
+      status("Please enter your name.");
+      $("guestName").focus();
+      return;
+    }
+
+    const button = $("guestContinueBtn");
+    button.disabled = true;
+
+    try {
+      status("Signing in as guest...");
+
+      const firebase = await waitForFirebase();
+
+      const user = await firebase.loginAsGuest();
+
+      try {
+        localStorage.setItem(
+          "meetspace-guest-name-" + user.uid,
+          name
+        );
+      } catch {}
+
+      setUser(name, user);
+
+    } catch (error) {
+      console.error("Guest login:", error);
+
+      status(
+        "Guest sign-in failed: " + error.message
+      );
+
+    } finally {
+      button.disabled = false;
+    }
+  }
+);
+
+/* Enter key for Guest Name */
+
+$("guestName").addEventListener(
+  "keydown",
+  (event) => {
+    if (event.key === "Enter") {
+      $("guestContinueBtn").click();
+    }
+  }
+);
+
+/* Restore Existing Firebase Session */
+
+async function restoreFirebaseSession() {
+  try {
+    const firebase = await waitForFirebase();
+
+    firebase.onAuthStateChanged(
+      firebase.auth,
+      (user) => {
+        if (!user || currentUser) return;
+
+        if (user.isAnonymous) {
+          const name = savedGuestName(user.uid);
+
+          if (name) {
+            setUser(name, user);
+          } else {
+            $("guestNameSection").hidden = false;
+
+            status(
+              "Enter your name to continue as Guest."
+            );
+          }
+
+          return;
+        }
+
+        setUser(
+          user.displayName ||
+          user.email ||
+          "Google User",
+          user
+        );
+      }
+    );
+
+  } catch (error) {
+    console.error("Firebase initialization:", error);
+    status(error.message);
+  }
+}
+
+/* ==========================================
+   SOCKET CONNECTION
+========================================== */
 
 async function connectSocket() {
   if (socket.connected) return;
@@ -90,150 +284,30 @@ async function connectSocket() {
   }
 
   const firebase = await waitForFirebase();
+
   const credential = await firebase.getUserToken();
 
   socket.auth = {
     name: currentUser.name,
-    credential
+    credential: credential
   };
 
-  return new Promise((resolve, reject) => {
+  await new Promise((resolve, reject) => {
     const onConnect = () => {
       socket.off("connect_error", onError);
       resolve();
     };
 
-    const onError = error => {
+    const onError = (error) => {
       socket.off("connect", onConnect);
       reject(error);
     };
 
     socket.once("connect", onConnect);
     socket.once("connect_error", onError);
+
     socket.connect();
   });
-}
-
-function setUser(name, firebaseUser) {
-  currentUser = {
-    name,
-    uid: firebaseUser.uid,
-    isGuest: firebaseUser.isAnonymous,
-    email: firebaseUser.email || null
-  };
-
-  $("userInfo").textContent =
-    name + (firebaseUser.isAnonymous ? " (Guest)" : "");
-
-  showSection("homeSection");
-  status("Signed in as " + name);
-}
-
-function getSavedGuestName(uid) {
-  return localStorage.getItem(
-    "meetspace-guest-name-" + uid
-  );
-}
-
-/* Google Login */
-
-$("googleLoginBtn").onclick = async () => {
-  const button = $("googleLoginBtn");
-  button.disabled = true;
-
-  try {
-    status("Signing in with Google...");
-
-    const firebase = await waitForFirebase();
-    const user = await firebase.loginWithGoogle();
-
-    setUser(
-      user.displayName || user.email || "Google User",
-      user
-    );
-
-    status("Google sign-in successful.");
-  } catch (error) {
-    console.error("Google login error:", error);
-    status("Google sign-in failed: " + error.message);
-  } finally {
-    button.disabled = false;
-  }
-};
-
-/* Show Guest Name */
-
-$("guestLoginBtn").onclick = () => {
-  $("guestNameSection").hidden = false;
-  $("guestName").focus();
-};
-
-/* Guest Login */
-
-$("guestContinueBtn").onclick = async () => {
-  const name = $("guestName").value.trim();
-
-  if (!name) {
-    status("Please enter your name.");
-    return;
-  }
-
-  const button = $("guestContinueBtn");
-  button.disabled = true;
-
-  try {
-    status("Signing in as a guest...");
-
-    const firebase = await waitForFirebase();
-    const user = await firebase.loginAsGuest();
-
-    localStorage.setItem(
-      "meetspace-guest-name-" + user.uid,
-      name
-    );
-
-    setUser(name, user);
-    status("Guest sign-in successful.");
-  } catch (error) {
-    console.error("Guest login error:", error);
-    status("Guest sign-in failed: " + error.message);
-  } finally {
-    button.disabled = false;
-  }
-};
-
-/* Restore Login */
-
-async function restoreFirebaseSession() {
-  try {
-    const firebase = await waitForFirebase();
-
-    firebase.onAuthStateChanged(
-      firebase.auth,
-      user => {
-        if (!user || currentUser) return;
-
-        if (user.isAnonymous) {
-          const name = getSavedGuestName(user.uid);
-
-          if (name) {
-            setUser(name, user);
-          } else {
-            $("guestNameSection").hidden = false;
-            status("Enter your guest name to continue.");
-          }
-        } else {
-          setUser(
-            user.displayName || user.email || "Google User",
-            user
-          );
-        }
-      }
-    );
-  } catch (error) {
-    console.error("Firebase error:", error);
-    status(error.message);
-  }
 }
 
 /* ==========================================
@@ -241,8 +315,11 @@ async function restoreFirebaseSession() {
 ========================================== */
 
 function meetingLink(roomId) {
-  return location.origin + "/?room=" +
-    encodeURIComponent(roomId);
+  return (
+    location.origin +
+    "/?room=" +
+    encodeURIComponent(roomId)
+  );
 }
 
 function updateRole(role) {
@@ -256,6 +333,7 @@ function updateRole(role) {
 
 function enterMeeting(roomId, role) {
   currentRoom = roomId;
+  currentRole = role;
 
   $("roomText").textContent = roomId;
 
@@ -265,16 +343,28 @@ function enterMeeting(roomId, role) {
   history.replaceState(
     {},
     "",
-    "/?room=" + encodeURIComponent(roomId)
+    meetingLink(roomId)
   );
+
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth"
+  });
 }
 
 /* ==========================================
-   VIDEO ELEMENTS
+   VIDEO UI
 ========================================== */
 
-function createVideo(id, name, stream, isLocal = false) {
-  let box = document.getElementById("video-" + id);
+function createVideo(
+  id,
+  name,
+  stream,
+  isLocal = false
+) {
+  let box = document.getElementById(
+    "video-" + id
+  );
 
   if (!box) {
     box = document.createElement("div");
@@ -282,6 +372,7 @@ function createVideo(id, name, stream, isLocal = false) {
     box.className = "video-box";
 
     const video = document.createElement("video");
+
     video.autoplay = true;
     video.playsInline = true;
     video.muted = isLocal;
@@ -293,9 +384,10 @@ function createVideo(id, name, stream, isLocal = false) {
     $("videoGrid").appendChild(box);
   }
 
-  box.querySelector(".video-label").textContent = name;
-
+  const label = box.querySelector(".video-label");
   const video = box.querySelector("video");
+
+  label.textContent = name;
 
   if (video.srcObject !== stream) {
     video.srcObject = stream;
@@ -304,29 +396,40 @@ function createVideo(id, name, stream, isLocal = false) {
   video.play().catch(() => {});
 }
 
+/* ==========================================
+   LOCAL CAMERA AND MICROPHONE
+========================================== */
+
 async function startMedia() {
   if (localStream) return;
 
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: true
-    });
-  } catch (error) {
-    console.warn("Camera unavailable:", error);
-
-    try {
-      localStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: false
+    localStream =
+      await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
       });
 
-      status("Camera unavailable. Microphone only.");
-    } catch (audioError) {
-      console.warn("Microphone unavailable:", audioError);
+  } catch (error) {
+    console.warn("Camera and microphone:", error);
 
+    try {
+      localStream =
+        await navigator.mediaDevices.getUserMedia({
+          video: false,
+          audio: true
+        });
+
+      status(
+        "Camera unavailable. Microphone enabled."
+      );
+
+    } catch {
       localStream = new MediaStream();
-      status("Camera and microphone unavailable.");
+
+      status(
+        "Camera and microphone unavailable."
+      );
     }
   }
 
@@ -337,34 +440,42 @@ async function startMedia() {
     true
   );
 
-  const hasAudio = localStream.getAudioTracks().length > 0;
-  const hasVideo = localStream.getVideoTracks().length > 0;
+  const audioTrack =
+    localStream.getAudioTracks()[0];
 
-  $("micBtn").textContent = hasAudio
-    ? "Mute Mic"
+  const videoTrack =
+    localStream.getVideoTracks()[0];
+
+  $("micBtn").disabled = !audioTrack;
+  $("cameraBtn").disabled = !videoTrack;
+
+  $("micBtn").textContent = audioTrack
+    ? "🎙 Mute Mic"
     : "Mic Unavailable";
 
-  $("cameraBtn").textContent = hasVideo
-    ? "Turn Camera Off"
+  $("cameraBtn").textContent = videoTrack
+    ? "◉ Turn Camera Off"
     : "Camera Unavailable";
-
-  $("micBtn").disabled = !hasAudio;
-  $("cameraBtn").disabled = !hasVideo;
 }
 
 /* ==========================================
-   WEBRTC PEER CONNECTIONS
+   WEBRTC CONNECTIONS
 ========================================== */
 
 function removePeer(id) {
-  const pc = peers.get(id);
+  const peer = peers.get(id);
 
-  if (pc) pc.close();
+  if (peer) {
+    peer.close();
+  }
 
   peers.delete(id);
+  remoteStreams.delete(id);
   candidateQueues.delete(id);
 
-  document.getElementById("video-" + id)?.remove();
+  document.getElementById(
+    "video-" + id
+  )?.remove();
 }
 
 function createPeer(id) {
@@ -372,41 +483,49 @@ function createPeer(id) {
     return peers.get(id);
   }
 
-  const pc = new RTCPeerConnection(rtcConfig);
+  const peer = new RTCPeerConnection(rtcConfig);
 
-  peers.set(id, pc);
+  peers.set(id, peer);
   candidateQueues.set(id, []);
 
   const remoteStream = new MediaStream();
+  remoteStreams.set(id, remoteStream);
 
-  const name =
-    participants.find(p => p.id === id)?.name ||
-    "Participant";
+  const person = participants.find(
+    (participant) => participant.id === id
+  );
+
+  const name = person?.name || "Participant";
 
   createVideo(id, name, remoteStream);
 
-  for (const track of localStream?.getTracks() || []) {
-    pc.addTrack(track, localStream);
+  if (localStream) {
+    localStream.getTracks().forEach((track) => {
+      peer.addTrack(track, localStream);
+    });
   }
 
-  pc.ontrack = event => {
+  peer.ontrack = (event) => {
     const tracks =
-      event.streams[0]?.getTracks() || [event.track];
+      event.streams[0]?.getTracks() ||
+      [event.track];
 
-    for (const track of tracks) {
-      const exists = remoteStream.getTracks().some(
-        existing => existing.id === track.id
-      );
+    tracks.forEach((track) => {
+      const exists = remoteStream
+        .getTracks()
+        .some((existing) => {
+          return existing.id === track.id;
+        });
 
       if (!exists) {
         remoteStream.addTrack(track);
       }
-    }
+    });
 
     createVideo(id, name, remoteStream);
   };
 
-  pc.onicecandidate = event => {
+  peer.onicecandidate = (event) => {
     if (!event.candidate) return;
 
     socket.emit("signal", {
@@ -418,76 +537,98 @@ function createPeer(id) {
     });
   };
 
-  pc.onconnectionstatechange = () => {
-    if (pc.connectionState === "connected") {
-      status("Live connection established.");
-    } else if (pc.connectionState === "failed") {
-      status("Connection failed for a participant.");
+  peer.onconnectionstatechange = () => {
+    if (peer.connectionState === "failed") {
+      status(
+        "Connection failed for a participant."
+      );
     }
   };
 
-  return pc;
+  return peer;
 }
 
 async function callPeer(id) {
-  const pc = createPeer(id);
+  const peer = createPeer(id);
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
+  const offer = await peer.createOffer();
+
+  await peer.setLocalDescription(offer);
 
   socket.emit("signal", {
     to: id,
     signal: {
       type: "offer",
-      sdp: pc.localDescription
+      sdp: peer.localDescription
     }
   });
+}
+
+async function flushCandidates(id, peer) {
+  if (!peer.remoteDescription) return;
+
+  const queue =
+    candidateQueues.get(id) || [];
+
+  candidateQueues.set(id, []);
+
+  for (const candidate of queue) {
+    await peer.addIceCandidate(candidate);
+  }
 }
 
 socket.on("signal", async ({ from, signal }) => {
   if (!currentRoom || !localStream) return;
 
   try {
-    const pc = createPeer(from);
+    const peer = createPeer(from);
 
     if (signal.type === "offer") {
-      await pc.setRemoteDescription(signal.sdp);
+      await peer.setRemoteDescription(
+        signal.sdp
+      );
 
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
+      await flushCandidates(from, peer);
+
+      const answer = await peer.createAnswer();
+
+      await peer.setLocalDescription(answer);
 
       socket.emit("signal", {
         to: from,
         signal: {
           type: "answer",
-          sdp: pc.localDescription
+          sdp: peer.localDescription
         }
       });
     }
 
     if (signal.type === "answer") {
-      await pc.setRemoteDescription(signal.sdp);
+      await peer.setRemoteDescription(
+        signal.sdp
+      );
+
+      await flushCandidates(from, peer);
     }
 
     if (signal.type === "candidate") {
-      if (pc.remoteDescription) {
-        await pc.addIceCandidate(signal.candidate);
+      if (peer.remoteDescription) {
+        await peer.addIceCandidate(
+          signal.candidate
+        );
       } else {
-        candidateQueues.get(from).push(signal.candidate);
+        candidateQueues.get(from).push(
+          signal.candidate
+        );
       }
     }
 
-    if (pc.remoteDescription) {
-      const queue = candidateQueues.get(from) || [];
-      candidateQueues.set(from, []);
-
-      for (const candidate of queue) {
-        await pc.addIceCandidate(candidate);
-      }
-    }
   } catch (error) {
-    console.error("WebRTC error:", error);
-    status("Video connection error: " + error.message);
+    console.error("WebRTC signaling:", error);
+
+    status(
+      "Video connection issue: " + error.message
+    );
   }
 });
 
@@ -495,168 +636,264 @@ socket.on("signal", async ({ from, signal }) => {
    CREATE MEETING
 ========================================== */
 
-$("createBtn").onclick = async () => {
-  const password = $("createPassword").value;
+$("createBtn").addEventListener(
+  "click",
+  async () => {
+    const password = $("createPassword").value;
 
-  if (password.length < 4) {
-    showErrorToast(
-      "createPassword",
-      "Password must have at least 4 characters."
-    );
-    return;
-  }
-
-  $("createBtn").disabled = true;
-
-  try {
-    await connectSocket();
-
-    const result = await request("create-room", {
-      password
-    });
-
-    if (!result.ok) {
-      throw new Error(result.error);
+    if (password.length < 4) {
+      showErrorToast(
+        "createPassword",
+        "Password must have at least 4 characters."
+      );
+      return;
     }
 
-    enterMeeting(result.roomId, "host");
-    renderParticipants(result.participants);
-
-    await startMedia();
-
-    status("Meeting created. Share the ID and password.");
-  } catch (error) {
-    status(error.message);
-  } finally {
-    $("createBtn").disabled = false;
-  }
-};
-
-/* ==========================================
-   JOIN MEETING
-========================================== */
-
-$("joinBtn").onclick = async () => {
-  const roomId = $("roomInput").value.trim();
-  const password = $("joinPassword").value;
-
-  if (!roomId || !password) {
-    status("Enter Meeting ID and Password.");
-    return;
-  }
-
-  $("joinBtn").disabled = true;
-
-  try {
-    await connectSocket();
-
-    const result = await request("request-join", {
-      roomId,
-      password
-    });
-
-    if (!result.ok) {
-      throw new Error(result.error);
+    if (password.length > 64) {
+      showErrorToast(
+        "createPassword",
+        "Password cannot exceed 64 characters."
+      );
+      return;
     }
 
-    currentRoom = roomId;
-    showSection("waitingSection");
+    const button = $("createBtn");
+    button.disabled = true;
 
-    status("Waiting for host approval.");
-  } catch (error) {
-    status(error.message);
-  } finally {
-    $("joinBtn").disabled = false;
-  }
-};
-
-/* ==========================================
-   MEETING SOCKET EVENTS
-========================================== */
-
-socket.on("join-approved", async data => {
-  try {
-    enterMeeting(data.roomId, data.role);
-    await startMedia();
-
-    for (const id of data.peers) {
-      await callPeer(id);
-    }
-
-    status("Host approved your request.");
-  } catch (error) {
-    status("Join error: " + error.message);
-  }
-});
-
-socket.on("join-rejected", () => {
-  resetMeeting();
-  status("Your request was rejected.");
-});
-
-socket.on("meeting-ended", () => {
-  resetMeeting();
-  status("The meeting has ended.");
-});
-
-socket.on("role-updated", role => {
-  updateRole(role);
-  renderParticipants(participants);
-  status("Your role is now " + role);
-});
-
-socket.on("user-left", id => {
-  removePeer(id);
-  status("A participant left.");
-});
-
-socket.on("user-joined", () => {
-  status("A participant joined.");
-});
-
-/* ==========================================
-   PARTICIPANTS
-========================================== */
-
-function actionButton(label, action, targetId) {
-  const button = document.createElement("button");
-  button.textContent = label;
-
-  button.onclick = async () => {
     try {
-      const result = await request(action, targetId);
+      status("Creating your meeting...");
+
+      await connectSocket();
+
+      const result = await request(
+        "create-room",
+        { password }
+      );
 
       if (!result.ok) {
         throw new Error(result.error);
       }
 
-      status(label + " successful.");
+      enterMeeting(result.roomId, "host");
+
+      renderParticipants(
+        result.participants || []
+      );
+
+      await startMedia();
+
+      status(
+        "Meeting created. Share the invite link and password."
+      );
+
     } catch (error) {
+      console.error("Create meeting:", error);
       status(error.message);
+
+    } finally {
+      button.disabled = false;
     }
-  };
+  }
+);
+
+/* ==========================================
+   JOIN MEETING
+========================================== */
+
+$("joinBtn").addEventListener(
+  "click",
+  async () => {
+    const roomId = $("roomInput").value.trim();
+    const password = $("joinPassword").value;
+
+    if (!roomId) {
+      status("Please enter a Meeting ID.");
+      $("roomInput").focus();
+      return;
+    }
+
+    if (!password) {
+      showErrorToast(
+        "joinPassword",
+        "Please enter the meeting password."
+      );
+      return;
+    }
+
+    const button = $("joinBtn");
+    button.disabled = true;
+
+    try {
+      status("Sending join request...");
+
+      await connectSocket();
+
+      const result = await request(
+        "request-join",
+        { roomId, password }
+      );
+
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+
+      currentRoom = roomId;
+
+      showSection("waitingSection");
+
+      status(
+        "Waiting for host or admin approval."
+      );
+
+    } catch (error) {
+      console.error("Join meeting:", error);
+      status(error.message);
+
+    } finally {
+      button.disabled = false;
+    }
+  }
+);
+
+/* ==========================================
+   JOIN APPROVAL EVENTS
+========================================== */
+
+socket.on("join-approved", async (data) => {
+  try {
+    enterMeeting(
+      data.roomId,
+      data.role || "participant"
+    );
+
+    await startMedia();
+
+    for (const id of data.peers || []) {
+      await callPeer(id);
+    }
+
+    status(
+      "Your request has been approved."
+    );
+
+  } catch (error) {
+    console.error("Join approved:", error);
+    status(error.message);
+  }
+});
+
+socket.on("join-rejected", () => {
+  resetMeeting();
+
+  status(
+    "Your meeting request was rejected."
+  );
+});
+
+socket.on("meeting-ended", () => {
+  resetMeeting();
+
+  status(
+    "The host has ended this meeting."
+  );
+});
+
+socket.on("role-updated", (role) => {
+  updateRole(role);
+  renderParticipants(participants);
+
+  status("Your role is now " + role);
+});
+
+socket.on("user-joined", () => {
+  status("A participant joined the meeting.");
+});
+
+socket.on("user-left", (id) => {
+  removePeer(id);
+  status("A participant left the meeting.");
+});
+
+/* ==========================================
+   PARTICIPANT ACTION BUTTON
+========================================== */
+
+function actionButton(
+  label,
+  eventName,
+  targetId
+) {
+  const button = document.createElement(
+    "button"
+  );
+
+  button.type = "button";
+  button.textContent = label;
+
+  button.addEventListener(
+    "click",
+    async () => {
+      button.disabled = true;
+
+      try {
+        const result = await request(
+          eventName,
+          targetId
+        );
+
+        if (!result.ok) {
+          throw new Error(result.error);
+        }
+
+        status(label + " successful.");
+
+      } catch (error) {
+        status(error.message);
+
+      } finally {
+        button.disabled = false;
+      }
+    }
+  );
 
   return button;
 }
 
+/* ==========================================
+   PARTICIPANT LIST
+========================================== */
+
 function renderParticipants(list) {
-  participants = list || [];
+  participants = Array.isArray(list)
+    ? list
+    : [];
 
   const container = $("participantList");
+
   container.replaceChildren();
 
   for (const participant of participants) {
     const row = document.createElement("div");
+
     row.className = "participant-item";
 
-    const details = document.createElement("div");
+    const details = document.createElement(
+      "div"
+    );
+
     details.className = "participant-details";
 
-    const name = document.createElement("span");
+    const name = document.createElement(
+      "span"
+    );
+
     name.className = "participant-name";
     name.textContent = participant.name;
 
-    const role = document.createElement("span");
+    const role = document.createElement(
+      "span"
+    );
+
     role.className = "participant-role";
     role.textContent = participant.role;
 
@@ -667,18 +904,19 @@ function renderParticipants(list) {
       currentRole === "host" &&
       participant.id !== socket.id
     ) {
-      const actions = document.createElement("div");
-      actions.className = "participant-actions";
+      const actions = document.createElement(
+        "div"
+      );
 
-      actions.appendChild(
+      actions.className =
+        "participant-actions";
+
+      actions.append(
         actionButton(
           "Make Admin",
           "assign-admin",
           participant.id
-        )
-      );
-
-      actions.appendChild(
+        ),
         actionButton(
           "Make Host",
           "transfer-host",
@@ -693,60 +931,97 @@ function renderParticipants(list) {
   }
 
   updateChatRecipients(participants);
+
+  // Refresh video labels
+  participants.forEach((person) => {
+    const box = document.getElementById(
+      "video-" + person.id
+    );
+
+    if (box) {
+      const label = box.querySelector(
+        ".video-label"
+      );
+
+      if (label) {
+        label.textContent = person.name;
+      }
+    }
+  });
 }
 
-socket.on("participants-updated", data => {
-  renderParticipants(data.participants);
-});
+socket.on(
+  "participants-updated",
+  (data) => {
+    renderParticipants(
+      data.participants || []
+    );
+  }
+);
 
 /* ==========================================
    WAITING ROOM
 ========================================== */
 
-socket.on("waiting-updated", waiting => {
-  const container = $("waitingList");
-  container.replaceChildren();
+socket.on(
+  "waiting-updated",
+  (waiting) => {
+    const container = $("waitingList");
+    container.replaceChildren();
 
-  if (!waiting.length) {
-    const p = document.createElement("p");
-    p.textContent = "No pending requests";
-    container.appendChild(p);
-    return;
+    if (!Array.isArray(waiting) || !waiting.length) {
+      const message = document.createElement(
+        "p"
+      );
+
+      message.textContent =
+        "No pending requests";
+
+      container.appendChild(message);
+      return;
+    }
+
+    for (const user of waiting) {
+      const row = document.createElement(
+        "div"
+      );
+
+      row.className = "waiting-item";
+
+      const name = document.createElement(
+        "span"
+      );
+
+      name.textContent = user.name;
+
+      const actions = document.createElement(
+        "div"
+      );
+
+      actions.className = "waiting-actions";
+
+      actions.append(
+        actionButton(
+          "Approve",
+          "approve-request",
+          user.id
+        ),
+        actionButton(
+          "Reject",
+          "reject-request",
+          user.id
+        )
+      );
+
+      row.append(name, actions);
+
+      container.appendChild(row);
+    }
   }
-
-  for (const user of waiting) {
-    const row = document.createElement("div");
-    row.className = "waiting-item";
-
-    const name = document.createElement("span");
-    name.textContent = user.name;
-
-    const actions = document.createElement("div");
-    actions.className = "waiting-actions";
-
-    actions.appendChild(
-      actionButton(
-        "Approve",
-        "approve-request",
-        user.id
-      )
-    );
-
-    actions.appendChild(
-      actionButton(
-        "Reject",
-        "reject-request",
-        user.id
-      )
-    );
-
-    row.append(name, actions);
-    container.appendChild(row);
-  }
-});
+);
 
 /* ==========================================
-   CHAT SETUP
+   MEETING CHAT
 ========================================== */
 
 const chatRecipient = $("chatRecipient");
@@ -755,76 +1030,114 @@ const chatForm = $("chatForm");
 const chatInput = $("chatInput");
 const chatSendBtn = $("chatSendBtn");
 
+/* Refresh recipient dropdown */
+
 function updateChatRecipients(list) {
   const previous = chatRecipient.value;
+
   chatRecipient.replaceChildren();
 
-  const everyone = document.createElement("option");
+  const everyone = document.createElement(
+    "option"
+  );
+
   everyone.value = "everyone";
-  everyone.textContent = "Everyone (Public)";
+  everyone.textContent =
+    "Everyone (Public)";
+
   chatRecipient.appendChild(everyone);
 
   for (const person of list || []) {
     if (person.id === socket.id) continue;
 
-    const option = document.createElement("option");
+    const option = document.createElement(
+      "option"
+    );
+
     option.value = person.id;
-    option.textContent = person.name + " (Private)";
+    option.textContent =
+      person.name + " (Private)";
 
     chatRecipient.appendChild(option);
   }
 
-  const available = [...chatRecipient.options].some(
-    option => option.value === previous
-  );
+  const exists = [
+    ...chatRecipient.options
+  ].some((option) => {
+    return option.value === previous;
+  });
 
-  chatRecipient.value = available
+  chatRecipient.value = exists
     ? previous
     : "everyone";
 }
 
-/* ==========================================
-   DISPLAY CHAT MESSAGE
-========================================== */
+/* Display public or private chat message */
 
 function displayChatMessage(message) {
   if (!currentRoom) return;
 
-  chatMessages.querySelector(".chat-empty")?.remove();
+  chatMessages.querySelector(
+    ".chat-empty"
+  )?.remove();
 
-  const isMine = message.from === socket.id;
+  const mine = message.from === socket.id;
 
-  const bubble = document.createElement("div");
+  const bubble = document.createElement(
+    "div"
+  );
+
   bubble.className = "chat-message";
 
-  if (isMine) bubble.classList.add("mine");
-  if (message.private) bubble.classList.add("private");
+  if (mine) {
+    bubble.classList.add("mine");
+  }
 
-  const header = document.createElement("div");
+  if (message.private) {
+    bubble.classList.add("private");
+  }
+
+  const header = document.createElement(
+    "div"
+  );
+
   header.className = "chat-message-header";
 
-  const name = document.createElement("span");
+  const name = document.createElement(
+    "span"
+  );
+
   name.className = "chat-message-name";
-  name.textContent = isMine
+
+  name.textContent = mine
     ? "You"
     : message.fromName;
 
-  const type = document.createElement("span");
+  const type = document.createElement(
+    "span"
+  );
+
   type.className = "chat-message-type";
 
   if (message.private) {
-    type.textContent = isMine
+    type.textContent = mine
       ? "🔒 Private to " + message.toName
       : "🔒 Private to you";
   } else {
     type.textContent = "Everyone";
   }
 
-  const text = document.createElement("div");
+  const text = document.createElement(
+    "div"
+  );
+
   text.className = "chat-message-text";
   text.textContent = message.text;
 
-  const time = document.createElement("span");
+  const time = document.createElement(
+    "span"
+  );
+
   time.className = "chat-message-time";
 
   time.textContent = new Date(
@@ -838,60 +1151,83 @@ function displayChatMessage(message) {
   bubble.append(header, text, time);
 
   chatMessages.appendChild(bubble);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  chatMessages.scrollTop =
+    chatMessages.scrollHeight;
 }
 
-socket.on("chat-message", displayChatMessage);
+socket.on(
+  "chat-message",
+  displayChatMessage
+);
 
-/* ==========================================
-   SEND CHAT MESSAGE
-========================================== */
+/* Send chat message */
 
-chatForm.addEventListener("submit", async event => {
-  event.preventDefault();
+chatForm.addEventListener(
+  "submit",
+  async (event) => {
+    event.preventDefault();
 
-  if (
-    !currentRoom ||
-    !socket.connected ||
-    $("meetingSection").hidden
-  ) {
-    status("Join a meeting to send messages.");
-    return;
-  }
-
-  const text = chatInput.value.trim();
-  if (!text) return;
-
-  chatSendBtn.disabled = true;
-
-  try {
-    const result = await request("chat-message", {
-      text,
-      to: chatRecipient.value
-    });
-
-    if (!result.ok) {
-      throw new Error(result.error);
+    if (
+      !socket.connected ||
+      !currentRoom ||
+      $("meetingSection").hidden
+    ) {
+      status(
+        "Join a meeting before sending messages."
+      );
+      return;
     }
 
-    chatInput.value = "";
-    chatInput.focus();
-  } catch (error) {
-    status("Message failed: " + error.message);
-  } finally {
-    chatSendBtn.disabled = false;
+    const text = chatInput.value.trim();
+
+    if (!text) return;
+
+    chatSendBtn.disabled = true;
+
+    try {
+      const result = await request(
+        "chat-message",
+        {
+          text,
+          to: chatRecipient.value
+        }
+      );
+
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+
+      chatInput.value = "";
+      chatInput.focus();
+
+    } catch (error) {
+      console.error("Send chat:", error);
+
+      status(
+        "Message failed: " + error.message
+      );
+
+    } finally {
+      chatSendBtn.disabled = false;
+    }
   }
-});
+);
 
 function clearMeetingChat() {
   chatMessages.replaceChildren();
 
-  const empty = document.createElement("p");
+  const empty = document.createElement(
+    "div"
+  );
+
   empty.className = "chat-empty";
+
   empty.textContent =
     "No messages yet. Start a conversation!";
 
   chatMessages.appendChild(empty);
+
   updateChatRecipients([]);
 
   chatInput.value = "";
@@ -902,116 +1238,169 @@ function clearMeetingChat() {
    COPY INVITE LINK
 ========================================== */
 
-$("copyBtn").onclick = async () => {
-  if (!currentRoom) return;
+$("copyBtn").addEventListener(
+  "click",
+  async () => {
+    if (!currentRoom) return;
 
-  try {
-    await navigator.clipboard.writeText(
-      meetingLink(currentRoom)
-    );
+    const button = $("copyBtn");
 
-    $("copyBtn").textContent = "Copied!";
+    try {
+      await navigator.clipboard.writeText(
+        meetingLink(currentRoom)
+      );
 
-    status(
-      "Invite link copied. Share password separately."
-    );
-  } catch (error) {
-    status("Could not copy link.");
+      button.textContent = "✓ Copied!";
+
+      status(
+        "Invite link copied. Share the meeting password separately."
+      );
+
+      setTimeout(() => {
+        button.textContent =
+          "⧉ Copy Invite Link";
+      }, 2500);
+
+    } catch (error) {
+      status(
+        "Unable to copy invite link."
+      );
+    }
   }
-};
+);
 
 /* ==========================================
-   MICROPHONE
+   MICROPHONE CONTROL
 ========================================== */
 
-$("micBtn").onclick = () => {
-  const track = localStream?.getAudioTracks()[0];
-  if (!track) return;
+$("micBtn").addEventListener(
+  "click",
+  () => {
+    const track =
+      localStream?.getAudioTracks()[0];
 
-  track.enabled = !track.enabled;
+    if (!track) return;
 
-  $("micBtn").textContent = track.enabled
-    ? "Mute Mic"
-    : "Unmute Mic";
-};
+    track.enabled = !track.enabled;
+
+    $("micBtn").textContent = track.enabled
+      ? "🎙 Mute Mic"
+      : "🎙 Unmute Mic";
+  }
+);
 
 /* ==========================================
-   CAMERA
+   CAMERA CONTROL
 ========================================== */
 
-$("cameraBtn").onclick = () => {
-  const track = localStream?.getVideoTracks()[0];
-  if (!track) return;
+$("cameraBtn").addEventListener(
+  "click",
+  () => {
+    const track =
+      localStream?.getVideoTracks()[0];
 
-  track.enabled = !track.enabled;
+    if (!track) return;
 
-  $("cameraBtn").textContent = track.enabled
-    ? "Turn Camera Off"
-    : "Turn Camera On";
-};
+    track.enabled = !track.enabled;
+
+    $("cameraBtn").textContent = track.enabled
+      ? "◉ Turn Camera Off"
+      : "◉ Turn Camera On";
+  }
+);
 
 /* ==========================================
    SCREEN SHARING
 ========================================== */
 
-$("screenBtn").onclick = async () => {
-  if (!currentRoom) return;
+$("screenBtn").addEventListener(
+  "click",
+  async () => {
+    if (!currentRoom) return;
 
-  try {
-    if (screenStream) {
-      await stopScreenShare();
-      return;
-    }
-
-    screenStream =
-      await navigator.mediaDevices.getDisplayMedia({
-        video: true
-      });
-
-    const screenTrack =
-      screenStream.getVideoTracks()[0];
-
-    for (const pc of peers.values()) {
-      const sender = pc.getSenders().find(
-        s => s.track?.kind === "video"
-      );
-
-      if (sender) {
-        await sender.replaceTrack(screenTrack);
+    try {
+      if (screenStream) {
+        await stopScreenShare();
+        return;
       }
+
+      screenStream =
+        await navigator.mediaDevices
+          .getDisplayMedia({
+            video: true
+          });
+
+      const screenTrack =
+        screenStream.getVideoTracks()[0];
+
+      for (const peer of peers.values()) {
+        const sender = peer
+          .getSenders()
+          .find((item) => {
+            return item.track?.kind === "video";
+          });
+
+        if (sender) {
+          await sender.replaceTrack(
+            screenTrack
+          );
+        }
+      }
+
+      screenTrack.onended = () => {
+        stopScreenShare().catch(
+          console.error
+        );
+      };
+
+      $("screenBtn").textContent =
+        "Stop Sharing";
+
+      status("Screen sharing started.");
+
+    } catch (error) {
+      console.error("Screen share:", error);
+
+      status(
+        "Screen sharing unavailable: " +
+        error.message
+      );
     }
-
-    screenTrack.onended = stopScreenShare;
-
-    $("screenBtn").textContent = "Stop Sharing";
-    status("Screen sharing started.");
-  } catch (error) {
-    status(
-      "Screen sharing unavailable: " + error.message
-    );
   }
-};
+);
 
 async function stopScreenShare() {
   if (!screenStream) return;
 
-  const cameraTrack =
-    localStream?.getVideoTracks()[0] || null;
+  const oldScreenStream = screenStream;
+  screenStream = null;
 
-  for (const pc of peers.values()) {
-    const sender = pc.getSenders().find(
-      s => s.track?.kind === "video"
-    );
+  const cameraTrack =
+    localStream?.getVideoTracks()[0] ||
+    null;
+
+  for (const peer of peers.values()) {
+    const sender = peer
+      .getSenders()
+      .find((item) => {
+        return item.track?.kind === "video";
+      });
 
     if (sender) {
-      await sender.replaceTrack(cameraTrack);
+      await sender.replaceTrack(
+        cameraTrack
+      );
     }
   }
 
-  screenStream.getTracks().forEach(track => track.stop());
-  screenStream = null;
+  oldScreenStream
+    .getTracks()
+    .forEach((track) => track.stop());
 
-  $("screenBtn").textContent = "Share Screen";
+  $("screenBtn").textContent =
+    "▣ Share Screen";
+
+  status("Screen sharing stopped.");
 }
 
 /* ==========================================
@@ -1019,21 +1408,27 @@ async function stopScreenShare() {
 ========================================== */
 
 function resetMeeting() {
+  if (isLeaving) return;
+
+  isLeaving = true;
+
   for (const id of [...peers.keys()]) {
     removePeer(id);
   }
 
   if (screenStream) {
-    screenStream.getTracks().forEach(
-      track => track.stop()
-    );
+    screenStream
+      .getTracks()
+      .forEach((track) => track.stop());
+
     screenStream = null;
   }
 
   if (localStream) {
-    localStream.getTracks().forEach(
-      track => track.stop()
-    );
+    localStream
+      .getTracks()
+      .forEach((track) => track.stop());
+
     localStream = null;
   }
 
@@ -1045,10 +1440,18 @@ function resetMeeting() {
   $("participantList").replaceChildren();
   $("waitingList").replaceChildren();
 
-  $("micBtn").textContent = "Mute Mic";
-  $("cameraBtn").textContent = "Turn Camera Off";
-  $("screenBtn").textContent = "Share Screen";
-  $("copyBtn").textContent = "Copy Invite Link";
+  $("micBtn").textContent = "🎙 Mute Mic";
+  $("cameraBtn").textContent =
+    "◉ Turn Camera Off";
+
+  $("screenBtn").textContent =
+    "▣ Share Screen";
+
+  $("copyBtn").textContent =
+    "⧉ Copy Invite Link";
+
+  $("micBtn").disabled = false;
+  $("cameraBtn").disabled = false;
 
   clearMeetingChat();
 
@@ -1056,122 +1459,165 @@ function resetMeeting() {
     socket.disconnect();
   }
 
-  history.replaceState({}, "", "/");
+  history.replaceState(
+    {},
+    "",
+    location.pathname
+  );
 
   showSection(
-    currentUser ? "homeSection" : "loginSection"
+    currentUser
+      ? "homeSection"
+      : "loginSection"
   );
+
+  isLeaving = false;
 }
 
 /* ==========================================
    LEAVE / CANCEL
 ========================================== */
 
-$("leaveBtn").onclick = () => {
-  socket.emit("leave-room");
-  resetMeeting();
-  status("You left the meeting.");
-};
+$("leaveBtn").addEventListener(
+  "click",
+  () => {
+    if (socket.connected) {
+      socket.emit("leave-room");
+    }
 
-$("cancelWaitingBtn").onclick = () => {
-  socket.emit("leave-room");
-  resetMeeting();
-  status("Join request cancelled.");
-};
+    resetMeeting();
+
+    status("You left the meeting.");
+  }
+);
+
+$("cancelWaitingBtn").addEventListener(
+  "click",
+  () => {
+    if (socket.connected) {
+      socket.emit("leave-room");
+    }
+
+    resetMeeting();
+
+    status("Join request cancelled.");
+  }
+);
 
 /* ==========================================
    DISCONNECT
 ========================================== */
 
 socket.on("disconnect", () => {
-  if (currentRoom) {
+  if (currentRoom && !isLeaving) {
     resetMeeting();
-    status("Disconnected from server. Please rejoin.");
+
+    status(
+      "Disconnected from server. Please rejoin."
+    );
   }
 });
 
 /* ==========================================
-   INVITATION LINK
+   INVITE LINK DETECTION
 ========================================== */
 
-const params = new URLSearchParams(location.search);
-const invitedRoom = params.get("room");
+const urlParams = new URLSearchParams(
+  location.search
+);
+
+const invitedRoom = urlParams.get("room");
 
 if (invitedRoom) {
   $("roomInput").value = invitedRoom;
 
   status(
-    "Meeting invitation detected. Please sign in."
+    "Meeting invitation detected. Sign in to continue."
   );
 }
 
 /* ==========================================
    TRANSPARENT PASSWORD ERROR TOAST
-   RIGHT SIDE ABOVE PASSWORD INPUT
+   ABOVE PASSWORD INPUT, RIGHT ALIGNED
 ========================================== */
 
 function showErrorToast(inputId, message) {
-  const input = document.getElementById(inputId);
+  const input = $(inputId);
+
   if (!input) return;
 
   const card = input.closest(".option-card");
+
   if (!card) return;
 
-  // Remove previous notification
-  card.querySelector(":scope > .validation-tooltip")?.remove();
+  const oldToast = card.querySelector(
+    ":scope > .validation-tooltip"
+  );
+
+  if (oldToast) {
+    oldToast.remove();
+  }
 
   clearTimeout(card._toastTimer);
   clearTimeout(card._toastRemoveTimer);
 
-  // Password input red border
   input.classList.add("input-error");
 
-  // New toast
-  const toast = document.createElement("div");
+  const toast = document.createElement(
+    "div"
+  );
+
   toast.className = "validation-tooltip";
   toast.setAttribute("role", "alert");
-  toast.textContent = "⚠ " + message;
+
+  toast.textContent =
+    "⚠ " + message;
 
   card.appendChild(toast);
 
-  // Position: top-right, just above password input
-  const cardRect = card.getBoundingClientRect();
-  const inputRect = input.getBoundingClientRect();
+  // Calculate actual position using the input.
+  const cardRect =
+    card.getBoundingClientRect();
 
-  const toastHeight = toast.getBoundingClientRect().height;
+  const inputRect =
+    input.getBoundingClientRect();
 
-  const topPosition =
+  const toastHeight =
+    toast.getBoundingClientRect().height;
+
+  const top =
     inputRect.top -
     cardRect.top -
     toastHeight -
-    14;
+    13;
 
   toast.style.position = "absolute";
-  toast.style.top = Math.max(8, topPosition) + "px";
+  toast.style.top =
+    Math.max(8, top) + "px";
+
   toast.style.bottom = "auto";
   toast.style.left = "auto";
   toast.style.right = "12px";
-  toast.style.zIndex = "999";
-  toast.style.maxWidth = "min(300px, calc(100% - 24px))";
-
-  // Arrow pointing down to password field
-  toast.classList.add("toast-above-input");
 
   input.focus();
 
-  // Remove after 4 seconds
   card._toastTimer = setTimeout(() => {
     toast.classList.add("toast-hide");
 
-    card._toastRemoveTimer = setTimeout(() => {
-      toast.remove();
-      input.classList.remove("input-error");
-    }, 250);
+    card._toastRemoveTimer =
+      setTimeout(() => {
+        toast.remove();
+
+        input.classList.remove(
+          "input-error"
+        );
+      }, 250);
+
   }, 4000);
 }
 
 /* ==========================================
-   INITIALIZE
+   INITIALIZE APP
 ========================================== */
 
 showSection("loginSection");
