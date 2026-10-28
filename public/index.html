@@ -4,148 +4,621 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MeetSpace | Video Meetings</title>
+  <meta name="theme-color" content="#101426">
+
+  <title>MeetSpace | Meet Beautifully</title>
+
   <link rel="stylesheet" href="/style.css">
 </head>
+
 <body>
 
+  <!-- Animated Background -->
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <div class="ambient ambient-three"></div>
+
+  <!-- ===================================
+       NAVIGATION
+  =================================== -->
+
   <header class="topbar">
-    <h1>MeetSpace</h1>
-    <div id="userInfo">Not signed in</div>
+
+    <a href="/" class="brand">
+      <span class="brand-icon">✦</span>
+      <span>
+        Meet<span class="brand-accent">Space</span>
+      </span>
+    </a>
+
+    <div class="header-actions">
+
+      <span id="userInfo" class="user-chip">
+        Not signed in
+      </span>
+
+      <button
+        id="themeToggle"
+        class="theme-toggle"
+        type="button"
+      >
+        ☀️ Light Mode
+      </button>
+
+    </div>
+
   </header>
 
   <main class="container">
 
-    <!-- Login Section -->
-    <section id="loginSection" class="panel">
-      <h2>Welcome to MeetSpace</h2>
-      <p>Sign in to create or join a meeting.</p>
+    <!-- ===================================
+         LOGIN SECTION
+    =================================== -->
 
-      <div id="googleLogin"></div>
+    <section id="loginSection" class="panel auth-card">
 
-      <div id="devLogin">
+      <div class="eyebrow">
+        <span class="live-dot"></span>
+        YOUR SPACE TO CONNECT
+      </div>
+
+      <div class="hero-symbol">
+        ✦
+      </div>
+
+      <h1>
+        Meet better.<br>
+        <span class="gradient-text">
+          Feel closer.
+        </span>
+      </h1>
+
+      <p class="section-intro">
+        Video meetings, shared ideas and private
+        conversations — all in one beautiful space.
+      </p>
+
+      <div class="login-options">
+
+        <button
+          id="googleLoginBtn"
+          class="google-btn"
+          type="button"
+        >
+          <span class="google-g">G</span>
+          Continue with Google
+        </button>
+
+        <button
+          id="guestLoginBtn"
+          class="secondary-btn"
+          type="button"
+        >
+          ✧ Continue as Guest
+        </button>
+
+      </div>
+
+      <!-- Guest Name -->
+
+      <div id="guestNameSection" class="guest-form" hidden>
+
+        <label for="guestName">
+          Your display name
+        </label>
+
         <input
+          id="guestName"
           type="text"
-          id="displayName"
-          placeholder="Enter your name"
+          placeholder="What should we call you?"
           maxlength="60"
         >
-        <button id="loginBtn">Continue</button>
+
+        <button
+          id="guestContinueBtn"
+          type="button"
+        >
+          Enter MeetSpace →
+        </button>
+
       </div>
+
+      <p class="helper-text">
+        No credit card needed. Join in seconds.
+      </p>
+
     </section>
 
-    <!-- Meeting Home -->
-    <section id="homeSection" class="panel" hidden>
-      <h2>Start or Join a Meeting</h2>
+    <!-- ===================================
+         HOME SECTION
+    =================================== -->
+
+    <section id="homeSection" class="home-wrap" hidden>
+
+      <div class="page-heading">
+
+        <div class="eyebrow">
+          <span class="live-dot"></span>
+          READY WHEN YOU ARE
+        </div>
+
+        <h1>
+          Your next great
+          <span class="gradient-text">
+            conversation.
+          </span>
+        </h1>
+
+        <p>
+          Start a room or join a conversation
+          with your team, class or friends.
+        </p>
+
+      </div>
 
       <div class="meeting-options">
-        <div class="option-card">
-          <h3>Create Meeting</h3>
-          <p>Create a secure meeting with a password.</p>
+
+        <!-- CREATE MEETING CARD -->
+
+        <div class="option-card panel">
+
+          <div class="feature-icon purple">
+            ✦
+          </div>
+
+          <h2>Create a meeting</h2>
+
+          <p>
+            Bring everyone together in a secure,
+            password-protected room.
+          </p>
+
+          <label for="createPassword">
+            Meeting password
+          </label>
 
           <input
             id="createPassword"
             type="password"
-            placeholder="Set meeting password"
+            placeholder="At least 4 characters"
             minlength="4"
             maxlength="64"
           >
 
-          <button id="createBtn">Create Meeting</button>
+          <button
+            id="createBtn"
+            type="button"
+          >
+            Create meeting ↗
+          </button>
+
         </div>
 
-        <div class="option-card">
-          <h3>Join Meeting</h3>
-          <p>Enter the Meeting ID and password.</p>
+        <!-- JOIN MEETING CARD -->
+
+        <div class="option-card panel">
+
+          <div class="feature-icon pink">
+            ↗
+          </div>
+
+          <h2>Join a meeting</h2>
+
+          <p>
+            Have an invite? Enter the room details
+            to request access.
+          </p>
+
+          <label for="roomInput">
+            Meeting ID
+          </label>
 
           <input
             id="roomInput"
             type="text"
-            placeholder="Meeting ID"
+            placeholder="Enter meeting ID"
           >
+
+          <label for="joinPassword">
+            Meeting password
+          </label>
 
           <input
             id="joinPassword"
             type="password"
-            placeholder="Meeting Password"
+            placeholder="Enter password"
           >
 
-          <button id="joinBtn">Request to Join</button>
+          <button
+            id="joinBtn"
+            type="button"
+          >
+            Request to join →
+          </button>
+
         </div>
+
       </div>
+
+      <p class="bottom-caption">
+        ✧ Built for real connections, big and small.
+      </p>
+
     </section>
 
-    <!-- Waiting Room -->
-    <section id="waitingSection" class="panel" hidden>
-      <h2>Waiting for Host Approval</h2>
+    <!-- ===================================
+         WAITING ROOM
+    =================================== -->
+
+    <section id="waitingSection" class="panel waiting-card" hidden>
+
+      <div class="waiting-symbol">
+        ⌛
+      </div>
+
+      <div class="eyebrow">
+        ALMOST THERE
+      </div>
+
+      <h2>
+        Waiting for host approval
+      </h2>
+
       <p>
         Your request has been sent.
-        The host must approve you before you can join.
+        The host will let you in when they're ready.
       </p>
 
       <div class="loader"></div>
 
-      <button id="cancelWaitingBtn" class="danger">
+      <button
+        id="cancelWaitingBtn"
+        class="danger"
+        type="button"
+      >
         Cancel Request
       </button>
+
     </section>
 
-    <!-- Active Meeting -->
+    <!-- ===================================
+         ACTIVE MEETING
+    =================================== -->
+
     <section id="meetingSection" hidden>
 
+      <!-- Meeting Header -->
+
       <div class="meeting-header panel">
-        <div>
-          <h2>Meeting Room</h2>
-          <p>Meeting ID: <strong id="roomText"></strong></p>
-          <p id="roleText">Role: Participant</p>
-        </div>
 
         <div>
-          <button id="copyBtn">Copy Invite Link</button>
+
+          <div class="eyebrow">
+            <span class="live-dot"></span>
+            LIVE MEETING
+          </div>
+
+          <h2>
+            Your meeting space
+          </h2>
+
+          <p>
+            Room ID:
+            <strong id="roomText"></strong>
+            ·
+            <span id="roleText">
+              Role: Participant
+            </span>
+          </p>
+
         </div>
+
+        <button
+          id="copyBtn"
+          class="secondary-btn"
+          type="button"
+        >
+          ⧉ Copy Invite Link
+        </button>
+
       </div>
+
+      <!-- Meeting Main Layout -->
 
       <div class="meeting-layout">
 
+        <!-- VIDEO AREA -->
+
         <div class="video-area">
-          <div id="videoGrid" class="video-grid"></div>
+
+          <div class="video-area-heading">
+
+            <h3>Live Video</h3>
+
+            <span class="small-pill">
+              ● Connected
+            </span>
+
+          </div>
+
+          <div
+            id="videoGrid"
+            class="video-grid"
+          ></div>
+
         </div>
 
+        <!-- PARTICIPANTS SIDEBAR -->
+
         <aside class="sidebar panel">
-          <h3>Participants</h3>
+
+          <div class="aside-heading">
+
+            <h3>Participants</h3>
+
+            <span>♧</span>
+
+          </div>
+
           <div id="participantList"></div>
 
+          <!-- Host / Admin Waiting List -->
+
           <div id="hostPanel" hidden>
+
             <hr>
-            <h3>Waiting Room</h3>
+
+            <h3>
+              Waiting Room
+            </h3>
+
             <div id="waitingList">
-              <p>No pending requests</p>
+
+              <p>
+                No pending requests
+              </p>
+
             </div>
+
           </div>
+
+        </aside>
+
+        <!-- ===================================
+             PUBLIC + PRIVATE CHAT
+        =================================== -->
+
+        <aside
+          id="chatPanel"
+          class="chat-panel panel"
+        >
+
+          <div class="chat-header">
+
+            <h3>
+              Meeting Chat
+            </h3>
+
+            <span class="chat-live">
+
+              <span class="live-dot"></span>
+
+              Live
+
+            </span>
+
+          </div>
+
+          <!-- Send To -->
+
+          <div class="chat-recipient">
+
+            <label for="chatRecipient">
+              SEND MESSAGE TO
+            </label>
+
+            <select id="chatRecipient">
+
+              <option value="everyone">
+                Everyone (Public)
+              </option>
+
+            </select>
+
+          </div>
+
+          <!-- Message Area -->
+
+          <div
+            id="chatMessages"
+            class="chat-messages"
+            role="log"
+            aria-live="polite"
+          >
+
+            <div class="chat-empty">
+
+              <span class="empty-icon">
+                ✧
+              </span>
+
+              <p>
+                Say hello!<br>
+                <small>
+                  Messages will appear here.
+                </small>
+              </p>
+
+            </div>
+
+          </div>
+
+          <!-- Chat Form -->
+
+          <form
+            id="chatForm"
+            class="chat-form"
+          >
+
+            <input
+              id="chatInput"
+              type="text"
+              placeholder="Write a message..."
+              maxlength="2000"
+              autocomplete="off"
+              required
+            >
+
+            <button
+              id="chatSendBtn"
+              type="submit"
+            >
+              ➤
+            </button>
+
+          </form>
+
+          <p class="chat-privacy-note">
+            🔒 Private messages are visible only
+            to you and the selected person.
+          </p>
+
         </aside>
 
       </div>
 
-      <div class="meeting-controls">
-        <button id="micBtn">Mute Mic</button>
-        <button id="cameraBtn">Turn Camera Off</button>
-        <button id="screenBtn">Share Screen</button>
-        <button id="leaveBtn" class="danger">
+      <!-- ===================================
+           MEETING CONTROLS
+      =================================== -->
+
+      <div class="meeting-controls panel">
+
+        <button
+          id="micBtn"
+          type="button"
+        >
+          🎙 Mute Mic
+        </button>
+
+        <button
+          id="cameraBtn"
+          type="button"
+        >
+          ◉ Turn Camera Off
+        </button>
+
+        <button
+          id="screenBtn"
+          type="button"
+        >
+          ▣ Share Screen
+        </button>
+
+        <button
+          id="leaveBtn"
+          class="danger"
+          type="button"
+        >
           Leave Meeting
         </button>
+
       </div>
 
     </section>
 
-    <p id="status" role="status" aria-live="polite">
+    <!-- ===================================
+         STATUS MESSAGE
+    =================================== -->
+
+    <p
+      id="status"
+      role="status"
+      aria-live="polite"
+    >
       Welcome to MeetSpace.
     </p>
 
   </main>
 
+  <!-- ===================================
+       SOCKET.IO + FIREBASE + APP JS
+  =================================== -->
+
   <script src="/socket.io/socket.io.js"></script>
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <script src="/firebase-config.js"></script>
+
+  <script
+    type="module"
+    src="/firebase-auth.js"
+  ></script>
+
   <script src="/script.js"></script>
+
+  <!-- ===================================
+       DARK / LIGHT MODE
+  =================================== -->
+
+  <script>
+    const themeToggle = document.getElementById("themeToggle");
+
+    function applyTheme(theme) {
+      const isLight = theme === "light";
+
+      document.body.classList.toggle(
+        "light-mode",
+        isLight
+      );
+
+      themeToggle.textContent = isLight
+        ? "🌙 Dark Mode"
+        : "☀️ Light Mode";
+
+      themeToggle.setAttribute(
+        "aria-label",
+        isLight
+          ? "Switch to dark mode"
+          : "Switch to light mode"
+      );
+
+      document
+        .querySelector('meta[name="theme-color"]')
+        .setAttribute(
+          "content",
+          isLight ? "#faf6ff" : "#101426"
+        );
+    }
+
+    let savedTheme = "dark";
+
+    try {
+      savedTheme =
+        localStorage.getItem("meetspace-theme") ||
+        "dark";
+    } catch (error) {
+      savedTheme = "dark";
+    }
+
+    applyTheme(savedTheme);
+
+    themeToggle.addEventListener("click", () => {
+      const nextTheme =
+        document.body.classList.contains("light-mode")
+          ? "dark"
+          : "light";
+
+      try {
+        localStorage.setItem(
+          "meetspace-theme",
+          nextTheme
+        );
+      } catch (error) {
+        console.warn("Theme preference could not be saved.");
+      }
+
+      applyTheme(nextTheme);
+    });
+  </script>
 
 </body>
 </html>

@@ -5,18 +5,32 @@ const express = require("express");
 const http = require("http");
 const crypto = require("crypto");
 const { Server } = require("socket.io");
-const { OAuth2Client } = require("google-auth-library");
+const { initializeApp, getApps } = require("firebase-admin/app");
+const { getAuth } = require("firebase-admin/auth");
+
+const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
+
+if (!PROJECT_ID) {
+  throw new Error(
+    "Set FIREBASE_PROJECT_ID in .env / Render environment"
+  );
+}
+
+// Firebase ID Token verification
+const firebaseApp = getApps().length
+  ? getApps()[0]
+  : initializeApp({ projectId: PROJECT_ID });
+
+const firebaseAuth = getAuth(firebaseApp);
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
-const googleClient = new OAuth2Client();
 
 const PORT = Number(process.env.PORT) || 3000;
-const DEV_LOGIN = process.env.DEV_LOGIN === "true";
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-
 const MAX_PARTICIPANTS = 10;
+const MAX_MESSAGE_LENGTH = 2000;
+
 const rooms = new Map();
 
 app.use(express.static("public"));
@@ -71,7 +85,10 @@ function updateWaiting(room) {
   );
 
   for (const [id, member] of room.members) {
-    if (member.role === "host" || member.role === "admin") {
+    if (
+      member.role === "host" ||
+      member.role === "admin"
+    ) {
       io.to(id).emit("waiting-updated", waiting);
     }
   }
@@ -90,7 +107,6 @@ function verifyPassword(password, room) {
   );
 }
 
-
 function leaveRoom(socket) {
   const room = getRoom(socket);
 
@@ -100,25 +116,24 @@ function leaveRoom(socket) {
   }
 
   const member = room.members.get(socket.id);
-  const isHost = member?.role === "host";
 
-  // Host leaves: end meeting for everyone
-  if (isHost) {
+  // Host leaves: End the meeting for everyone
+  if (member?.role === "host") {
     const allUsers = [
       ...room.members.keys(),
       ...room.waiting.keys()
     ];
 
-    for (const userId of allUsers) {
-      const userSocket = io.sockets.sockets.get(userId);
+    for (const id of allUsers) {
+      const target = io.sockets.sockets.get(id);
 
-      if (userSocket) {
-        userSocket.data.roomId = null;
-        userSocket.leave(room.id);
+      if (!target) continue;
 
-        if (userId !== socket.id) {
-          io.to(userId).emit("meeting-ended");
-        }
+      target.data.roomId = null;
+      target.leave(room.id);
+
+      if (id !== socket.id) {
+        io.to(id).emit("meeting-ended");
       }
     }
 
@@ -126,31 +141,13 @@ function leaveRoom(socket) {
     room.waiting.clear();
     rooms.delete(room.id);
 
-    console.log("Meeting ended by host:", room.id);
+    console.log("Meeting ended:", room.id);
     return;
   }
 
-  // Normal participant or waiting user leaves
-  const wasMember = room.members.has(socket.id);
+  // Participant or waiting user leaves
+  const wasMember = room.members.delete(socket.id);
 
-  room.members.delete(socket.id);
-  room.waiting.delete(socket.id);
-
-  socket.leave(room.id);
-  socket.data.roomId = null;
-
-  if (wasMember) {
-    socket.to(room.id).emit("user-left", socket.id);
-  }
-
-  updateParticipants(room);
-  updateWaiting(room);
-}
-
-
-  const wasMember = room.members.has(socket.id);
-
-  room.members.delete(socket.id);
   room.waiting.delete(socket.id);
 
   socket.leave(room.id);
@@ -163,86 +160,78 @@ function leaveRoom(socket) {
     );
   }
 
-  if (room.members.size === 0) {
-    for (const id of room.waiting.keys()) {
-      io.to(id).emit("meeting-ended");
-    }
-
-    rooms.delete(room.id);
-    return;
-  }
-
-  const hasHost = [...room.members.values()].some(
-    user => user.role === "host"
-  );
-
-  if (!hasHost) {
-    const nextHost =
-      [...room.members.entries()].find(
-        ([id, user]) => user.role === "admin"
-      ) || room.members.entries().next().value;
-
-    if (nextHost) {
-      nextHost[1].role = "host";
-      io.to(nextHost[0]).emit("role-updated", "host");
-    }
-  }
-
   updateParticipants(room);
   updateWaiting(room);
+}
 
-
+// Firebase Authentication Middleware
 io.use(async (socket, next) => {
   try {
-    const auth = socket.handshake.auth || {};
+    const credential =
+      socket.handshake.auth?.credential;
 
-    if (DEV_LOGIN) {
-      const name = String(
-        auth.name || "Test User"
-      ).trim().slice(0, 60);
-
-      socket.data.user = {
-        id: "dev-" + socket.id,
-        name,
-        email: null
-      };
-
-      return next();
-    }
-
-    if (!GOOGLE_CLIENT_ID || !auth.credential) {
+    if (
+      typeof credential !== "string" ||
+      !credential
+    ) {
       return next(
-        new Error("Google login required")
+        new Error("Firebase login required")
       );
     }
 
-    const ticket = await googleClient.verifyIdToken({
-      idToken: auth.credential,
-      audience: GOOGLE_CLIENT_ID
-    });
+    const claims =
+      await firebaseAuth.verifyIdToken(credential);
 
-    const payload = ticket.getPayload();
-
-    if (!payload?.sub || !payload?.email_verified) {
-      return next(new Error("Invalid Google account"));
+    if (!claims.uid) {
+      return next(
+        new Error("Invalid Firebase account")
+      );
     }
 
+    const isGuest =
+      claims.firebase?.sign_in_provider === "anonymous";
+
+    const guestName = String(
+      socket.handshake.auth?.name || "Guest"
+    ).trim().slice(0, 60) || "Guest";
+
     socket.data.user = {
-      id: payload.sub,
-      name: payload.name || payload.email,
-      email: payload.email
+      id: claims.uid,
+
+      name: isGuest
+        ? guestName
+        : (
+          claims.name ||
+          claims.email ||
+          "Google User"
+        ),
+
+      email: claims.email || null,
+      isGuest
     };
 
     next();
 
   } catch (error) {
-    next(new Error("Authentication failed"));
+    console.warn(
+      "Authentication rejected:",
+      error.code || error.message
+    );
+
+    next(
+      new Error("Firebase authentication failed")
+    );
   }
 });
 
+// Socket.IO Connection
 io.on("connection", socket => {
-  console.log("Connected:", socket.data.user.name);
+  console.log(
+    "Connected:",
+    socket.data.user.name
+  );
 
+  // Create Meeting
   socket.on("create-room", (data = {}, callback) => {
     if (socket.data.roomId) {
       return reply(callback, {
@@ -251,9 +240,14 @@ io.on("connection", socket => {
       });
     }
 
-    const password = String(data.password || "");
+    const password = String(
+      data.password || ""
+    );
 
-    if (password.length < 4 || password.length > 64) {
+    if (
+      password.length < 4 ||
+      password.length > 64
+    ) {
       return reply(callback, {
         ok: false,
         error: "Password must be 4 to 64 characters"
@@ -263,7 +257,8 @@ io.on("connection", socket => {
     let roomId;
 
     do {
-      roomId = crypto.randomBytes(5).toString("hex");
+      roomId =
+        crypto.randomBytes(5).toString("hex");
     } while (rooms.has(roomId));
 
     const salt = crypto.randomBytes(16);
@@ -282,6 +277,7 @@ io.on("connection", socket => {
     });
 
     rooms.set(roomId, room);
+
     socket.join(roomId);
     socket.data.roomId = roomId;
 
@@ -295,6 +291,7 @@ io.on("connection", socket => {
     updateParticipants(room);
   });
 
+  // Request to Join Meeting
   socket.on("request-join", (data = {}, callback) => {
     if (socket.data.roomId) {
       return reply(callback, {
@@ -303,8 +300,14 @@ io.on("connection", socket => {
       });
     }
 
-    const roomId = String(data.roomId || "").trim();
-    const password = String(data.password || "");
+    const roomId = String(
+      data.roomId || ""
+    ).trim();
+
+    const password = String(
+      data.password || ""
+    );
+
     const room = rooms.get(roomId);
 
     if (!room) {
@@ -322,7 +325,8 @@ io.on("connection", socket => {
     }
 
     if (
-      room.members.size + room.waiting.size >= MAX_PARTICIPANTS
+      room.members.size + room.waiting.size >=
+      MAX_PARTICIPANTS
     ) {
       return reply(callback, {
         ok: false,
@@ -344,6 +348,7 @@ io.on("connection", socket => {
     updateWaiting(room);
   });
 
+  // Approve Participant
   socket.on("approve-request", (targetId, callback) => {
     const room = getRoom(socket);
     const actor = getMember(socket);
@@ -359,7 +364,8 @@ io.on("connection", socket => {
       });
     }
 
-    const waitingUser = room.waiting.get(targetId);
+    const waitingUser =
+      room.waiting.get(targetId);
 
     if (!waitingUser) {
       return reply(callback, {
@@ -375,7 +381,9 @@ io.on("connection", socket => {
       });
     }
 
-    const existingPeers = [...room.members.keys()];
+    const existingPeers = [
+      ...room.members.keys()
+    ];
 
     room.waiting.delete(targetId);
 
@@ -384,11 +392,14 @@ io.on("connection", socket => {
       role: "participant"
     });
 
-    const targetSocket = io.sockets.sockets.get(targetId);
+    const targetSocket =
+      io.sockets.sockets.get(targetId);
 
     if (!targetSocket) {
       room.members.delete(targetId);
+
       updateWaiting(room);
+
       return reply(callback, {
         ok: false,
         error: "User disconnected"
@@ -414,6 +425,7 @@ io.on("connection", socket => {
     reply(callback, { ok: true });
   });
 
+  // Reject Participant
   socket.on("reject-request", (targetId, callback) => {
     const room = getRoom(socket);
     const actor = getMember(socket);
@@ -438,7 +450,8 @@ io.on("connection", socket => {
 
     room.waiting.delete(targetId);
 
-    const targetSocket = io.sockets.sockets.get(targetId);
+    const targetSocket =
+      io.sockets.sockets.get(targetId);
 
     if (targetSocket) {
       targetSocket.data.roomId = null;
@@ -451,10 +464,13 @@ io.on("connection", socket => {
     reply(callback, { ok: true });
   });
 
+  // Assign Admin
   socket.on("assign-admin", (targetId, callback) => {
     const room = getRoom(socket);
     const actor = getMember(socket);
-    const target = room?.members.get(targetId);
+
+    const target =
+      room?.members.get(targetId);
 
     if (
       !actor ||
@@ -470,7 +486,10 @@ io.on("connection", socket => {
 
     target.role = "admin";
 
-    io.to(targetId).emit("role-updated", "admin");
+    io.to(targetId).emit(
+      "role-updated",
+      "admin"
+    );
 
     updateParticipants(room);
     updateWaiting(room);
@@ -478,10 +497,13 @@ io.on("connection", socket => {
     reply(callback, { ok: true });
   });
 
+  // Transfer Host
   socket.on("transfer-host", (targetId, callback) => {
     const room = getRoom(socket);
     const actor = getMember(socket);
-    const target = room?.members.get(targetId);
+
+    const target =
+      room?.members.get(targetId);
 
     if (
       !actor ||
@@ -498,8 +520,15 @@ io.on("connection", socket => {
     actor.role = "admin";
     target.role = "host";
 
-    io.to(socket.id).emit("role-updated", "admin");
-    io.to(targetId).emit("role-updated", "host");
+    io.to(socket.id).emit(
+      "role-updated",
+      "admin"
+    );
+
+    io.to(targetId).emit(
+      "role-updated",
+      "host"
+    );
 
     updateParticipants(room);
     updateWaiting(room);
@@ -507,6 +536,94 @@ io.on("connection", socket => {
     reply(callback, { ok: true });
   });
 
+  // Public + Private Meeting Chat
+  socket.on("chat-message", (data = {}, callback) => {
+    const room = getRoom(socket);
+    const sender = getMember(socket);
+
+    if (!room || !sender) {
+      return reply(callback, {
+        ok: false,
+        error: "Join a meeting first"
+      });
+    }
+
+    const text =
+      typeof data.text === "string"
+        ? data.text.trim()
+        : "";
+
+    if (
+      !text ||
+      text.length > MAX_MESSAGE_LENGTH
+    ) {
+      return reply(callback, {
+        ok: false,
+        error: "Message must be 1 to 2000 characters"
+      });
+    }
+
+    const to =
+      data.to === "everyone"
+        ? "everyone"
+        : data.to;
+
+    if (
+      to !== "everyone" &&
+      (
+        typeof to !== "string" ||
+        !room.members.has(to)
+      )
+    ) {
+      return reply(callback, {
+        ok: false,
+        error: "Recipient is not in this meeting"
+      });
+    }
+
+    const message = {
+      id: crypto.randomUUID(),
+      from: socket.id,
+      fromName: sender.name,
+      to,
+      toName:
+        to === "everyone"
+          ? "Everyone"
+          : room.members.get(to).name,
+      text,
+      private: to !== "everyone",
+      timestamp: Date.now()
+    };
+
+    if (to === "everyone") {
+      // Public message: Everyone in meeting
+      io.to(room.id).emit(
+        "chat-message",
+        message
+      );
+
+    } else {
+      // Private message: Sender and Receiver only
+      io.to(socket.id).emit(
+        "chat-message",
+        message
+      );
+
+      if (to !== socket.id) {
+        io.to(to).emit(
+          "chat-message",
+          message
+        );
+      }
+    }
+
+    reply(callback, {
+      ok: true,
+      id: message.id
+    });
+  });
+
+  // WebRTC Signaling
   socket.on("signal", (data = {}) => {
     const room = getRoom(socket);
 
@@ -527,23 +644,30 @@ io.on("connection", socket => {
     });
   });
 
+  // Leave Meeting
   socket.on("leave-room", () => {
     leaveRoom(socket);
   });
 
+  // Disconnect
   socket.on("disconnect", () => {
     leaveRoom(socket);
 
-    console.log("Disconnected:", socket.id);
+    console.log(
+      "Disconnected:",
+      socket.id
+    );
   });
 });
 
+// Start Server
 server.listen(PORT, () => {
   console.log(
-    "Zoom Clone server running at http://localhost:" + PORT
+    "MeetSpace server running at http://localhost:" +
+    PORT
   );
+
   console.log(
-    "Login mode:",
-    DEV_LOGIN ? "Development" : "Google"
+    "Login mode: Firebase Google + Anonymous"
   );
 });

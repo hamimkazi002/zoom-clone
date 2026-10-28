@@ -1,4 +1,9 @@
 
+/* ==========================================
+   MeetSpace - Complete Frontend JavaScript
+   Firebase + Video + Public/Private Chat
+========================================== */
+
 const $ = id => document.getElementById(id);
 
 const socket = io({
@@ -11,7 +16,6 @@ let currentRole = null;
 let currentUser = null;
 let localStream = null;
 let screenStream = null;
-let googleCredential = null;
 let participants = [];
 
 const peers = new Map();
@@ -24,19 +28,23 @@ const rtcConfig = {
   ]
 };
 
+/* ==========================================
+   BASIC FUNCTIONS
+========================================== */
+
 function status(message) {
   $("status").textContent = message;
 }
 
 function showSection(sectionId) {
-  for (const id of [
+  [
     "loginSection",
     "homeSection",
     "waitingSection",
     "meetingSection"
-  ]) {
+  ].forEach(id => {
     $(id).hidden = id !== sectionId;
-  }
+  });
 }
 
 function request(eventName, data) {
@@ -55,60 +63,215 @@ function request(eventName, data) {
   });
 }
 
-function connectSocket() {
-  return new Promise((resolve, reject) => {
-    if (socket.connected) return resolve();
+/* ==========================================
+   FIREBASE AUTHENTICATION
+========================================== */
 
-    socket.auth = {
-      name: currentUser?.name,
-      credential: googleCredential
+async function waitForFirebase() {
+  for (let attempt = 0; attempt < 80; attempt++) {
+    if (window.meetspaceAuth) {
+      await window.meetspaceAuth.authReady;
+      return window.meetspaceAuth;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  throw new Error(
+    "Firebase failed to load. Check Firebase configuration."
+  );
+}
+
+async function connectSocket() {
+  if (socket.connected) return;
+
+  if (!currentUser) {
+    throw new Error("Please sign in first.");
+  }
+
+  const firebase = await waitForFirebase();
+  const credential = await firebase.getUserToken();
+
+  socket.auth = {
+    name: currentUser.name,
+    credential
+  };
+
+  return new Promise((resolve, reject) => {
+    const onConnect = () => {
+      socket.off("connect_error", onError);
+      resolve();
     };
 
-    socket.once("connect", resolve);
-    socket.once("connect_error", reject);
+    const onError = error => {
+      socket.off("connect", onConnect);
+      reject(error);
+    };
+
+    socket.once("connect", onConnect);
+    socket.once("connect_error", onError);
     socket.connect();
   });
 }
 
-function setUser(name) {
-  currentUser = { name };
-  $("userInfo").textContent = name;
+function setUser(name, firebaseUser) {
+  currentUser = {
+    name,
+    uid: firebaseUser.uid,
+    isGuest: firebaseUser.isAnonymous,
+    email: firebaseUser.email || null
+  };
+
+  $("userInfo").textContent =
+    name + (firebaseUser.isAnonymous ? " (Guest)" : "");
+
   showSection("homeSection");
   status("Signed in as " + name);
 }
 
-$("loginBtn").onclick = () => {
-  const name = $("displayName").value.trim();
+function getSavedGuestName(uid) {
+  return localStorage.getItem(
+    "meetspace-guest-name-" + uid
+  );
+}
+
+/* Google Login */
+
+$("googleLoginBtn").onclick = async () => {
+  const button = $("googleLoginBtn");
+  button.disabled = true;
+
+  try {
+    status("Signing in with Google...");
+
+    const firebase = await waitForFirebase();
+    const user = await firebase.loginWithGoogle();
+
+    setUser(
+      user.displayName || user.email || "Google User",
+      user
+    );
+
+    status("Google sign-in successful.");
+  } catch (error) {
+    console.error("Google login error:", error);
+    status("Google sign-in failed: " + error.message);
+  } finally {
+    button.disabled = false;
+  }
+};
+
+/* Show Guest Name */
+
+$("guestLoginBtn").onclick = () => {
+  $("guestNameSection").hidden = false;
+  $("guestName").focus();
+};
+
+/* Guest Login */
+
+$("guestContinueBtn").onclick = async () => {
+  const name = $("guestName").value.trim();
 
   if (!name) {
     status("Please enter your name.");
     return;
   }
 
-  setUser(name);
+  const button = $("guestContinueBtn");
+  button.disabled = true;
+
+  try {
+    status("Signing in as a guest...");
+
+    const firebase = await waitForFirebase();
+    const user = await firebase.loginAsGuest();
+
+    localStorage.setItem(
+      "meetspace-guest-name-" + user.uid,
+      name
+    );
+
+    setUser(name, user);
+    status("Guest sign-in successful.");
+  } catch (error) {
+    console.error("Guest login error:", error);
+    status("Guest sign-in failed: " + error.message);
+  } finally {
+    button.disabled = false;
+  }
 };
 
-// Google login will be configured in a later step.
-// Development login is currently enabled in .env.
+/* Restore Login */
 
-window.handleGoogleLogin = response => {
-  googleCredential = response.credential;
+async function restoreFirebaseSession() {
+  try {
+    const firebase = await waitForFirebase();
 
-  const payload = JSON.parse(
-    atob(
-      response.credential.split(".")[1]
-        .replace(/-/g, "+")
-        .replace(/_/g, "/")
-    )
-  );
+    firebase.onAuthStateChanged(
+      firebase.auth,
+      user => {
+        if (!user || currentUser) return;
 
-  setUser(payload.name || payload.email);
-};
+        if (user.isAnonymous) {
+          const name = getSavedGuestName(user.uid);
+
+          if (name) {
+            setUser(name, user);
+          } else {
+            $("guestNameSection").hidden = false;
+            status("Enter your guest name to continue.");
+          }
+        } else {
+          setUser(
+            user.displayName || user.email || "Google User",
+            user
+          );
+        }
+      }
+    );
+  } catch (error) {
+    console.error("Firebase error:", error);
+    status(error.message);
+  }
+}
+
+/* ==========================================
+   MEETING HELPERS
+========================================== */
 
 function meetingLink(roomId) {
   return location.origin + "/?room=" +
     encodeURIComponent(roomId);
 }
+
+function updateRole(role) {
+  currentRole = role;
+
+  $("roleText").textContent = "Role: " + role;
+
+  $("hostPanel").hidden =
+    role !== "host" && role !== "admin";
+}
+
+function enterMeeting(roomId, role) {
+  currentRoom = roomId;
+
+  $("roomText").textContent = roomId;
+
+  updateRole(role);
+  showSection("meetingSection");
+
+  history.replaceState(
+    {},
+    "",
+    "/?room=" + encodeURIComponent(roomId)
+  );
+}
+
+/* ==========================================
+   VIDEO ELEMENTS
+========================================== */
 
 function createVideo(id, name, stream, isLocal = false) {
   let box = document.getElementById("video-" + id);
@@ -158,7 +321,7 @@ async function startMedia() {
         video: false
       });
 
-      status("Camera unavailable. Joined with microphone only.");
+      status("Camera unavailable. Microphone only.");
     } catch (audioError) {
       console.warn("Microphone unavailable:", audioError);
 
@@ -174,20 +337,24 @@ async function startMedia() {
     true
   );
 
-  $("micBtn").textContent = localStream.getAudioTracks().length
+  const hasAudio = localStream.getAudioTracks().length > 0;
+  const hasVideo = localStream.getVideoTracks().length > 0;
+
+  $("micBtn").textContent = hasAudio
     ? "Mute Mic"
     : "Mic Unavailable";
 
-  $("cameraBtn").textContent = localStream.getVideoTracks().length
+  $("cameraBtn").textContent = hasVideo
     ? "Turn Camera Off"
     : "Camera Unavailable";
 
-  $("micBtn").disabled =
-    localStream.getAudioTracks().length === 0;
-
-  $("cameraBtn").disabled =
-    localStream.getVideoTracks().length === 0;
+  $("micBtn").disabled = !hasAudio;
+  $("cameraBtn").disabled = !hasVideo;
 }
+
+/* ==========================================
+   WEBRTC PEER CONNECTIONS
+========================================== */
 
 function removePeer(id) {
   const pc = peers.get(id);
@@ -197,12 +364,13 @@ function removePeer(id) {
   peers.delete(id);
   candidateQueues.delete(id);
 
-  const box = document.getElementById("video-" + id);
-  if (box) box.remove();
+  document.getElementById("video-" + id)?.remove();
 }
 
 function createPeer(id) {
-  if (peers.has(id)) return peers.get(id);
+  if (peers.has(id)) {
+    return peers.get(id);
+  }
 
   const pc = new RTCPeerConnection(rtcConfig);
 
@@ -211,8 +379,9 @@ function createPeer(id) {
 
   const remoteStream = new MediaStream();
 
-  const name = participants.find(p => p.id === id)?.name
-    || "Participant";
+  const name =
+    participants.find(p => p.id === id)?.name ||
+    "Participant";
 
   createVideo(id, name, remoteStream);
 
@@ -221,13 +390,15 @@ function createPeer(id) {
   }
 
   pc.ontrack = event => {
-    const tracks = event.streams[0]?.getTracks()
-      || [event.track];
+    const tracks =
+      event.streams[0]?.getTracks() || [event.track];
 
     for (const track of tracks) {
-      if (!remoteStream.getTracks().some(
+      const exists = remoteStream.getTracks().some(
         existing => existing.id === track.id
-      )) {
+      );
+
+      if (!exists) {
         remoteStream.addTrack(track);
       }
     }
@@ -308,7 +479,6 @@ socket.on("signal", async ({ from, signal }) => {
 
     if (pc.remoteDescription) {
       const queue = candidateQueues.get(from) || [];
-
       candidateQueues.set(from, []);
 
       for (const candidate of queue) {
@@ -316,38 +486,23 @@ socket.on("signal", async ({ from, signal }) => {
       }
     }
   } catch (error) {
-    console.error("WebRTC signaling error:", error);
+    console.error("WebRTC error:", error);
     status("Video connection error: " + error.message);
   }
 });
 
-function updateRole(role) {
-  currentRole = role;
-  $("roleText").textContent = "Role: " + role;
-
-  $("hostPanel").hidden =
-    role !== "host" && role !== "admin";
-}
-
-function enterMeeting(roomId, role) {
-  currentRoom = roomId;
-
-  $("roomText").textContent = roomId;
-  updateRole(role);
-  showSection("meetingSection");
-
-  history.replaceState(
-    {},
-    "",
-    "/?room=" + encodeURIComponent(roomId)
-  );
-}
+/* ==========================================
+   CREATE MEETING
+========================================== */
 
 $("createBtn").onclick = async () => {
   const password = $("createPassword").value;
 
   if (password.length < 4) {
-    status("Password must have at least 4 characters.");
+    showErrorToast(
+      "createPassword",
+      "Password must have at least 4 characters."
+    );
     return;
   }
 
@@ -360,7 +515,9 @@ $("createBtn").onclick = async () => {
       password
     });
 
-    if (!result.ok) throw new Error(result.error);
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
 
     enterMeeting(result.roomId, "host");
     renderParticipants(result.participants);
@@ -374,6 +531,10 @@ $("createBtn").onclick = async () => {
     $("createBtn").disabled = false;
   }
 };
+
+/* ==========================================
+   JOIN MEETING
+========================================== */
 
 $("joinBtn").onclick = async () => {
   const roomId = $("roomInput").value.trim();
@@ -394,12 +555,14 @@ $("joinBtn").onclick = async () => {
       password
     });
 
-    if (!result.ok) throw new Error(result.error);
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
 
     currentRoom = roomId;
     showSection("waitingSection");
 
-    status("Request sent. Waiting for host approval.");
+    status("Waiting for host approval.");
   } catch (error) {
     status(error.message);
   } finally {
@@ -407,17 +570,20 @@ $("joinBtn").onclick = async () => {
   }
 };
 
+/* ==========================================
+   MEETING SOCKET EVENTS
+========================================== */
+
 socket.on("join-approved", async data => {
   try {
     enterMeeting(data.roomId, data.role);
-
     await startMedia();
 
     for (const id of data.peers) {
       await callPeer(id);
     }
 
-    status("Host approved your request. Joined meeting.");
+    status("Host approved your request.");
   } catch (error) {
     status("Join error: " + error.message);
   }
@@ -425,7 +591,7 @@ socket.on("join-approved", async data => {
 
 socket.on("join-rejected", () => {
   resetMeeting();
-  status("Your request was rejected by the host.");
+  status("Your request was rejected.");
 });
 
 socket.on("meeting-ended", () => {
@@ -445,12 +611,12 @@ socket.on("user-left", id => {
 });
 
 socket.on("user-joined", () => {
-  status("A participant joined the meeting.");
+  status("A participant joined.");
 });
 
-socket.on("participants-updated", data => {
-  renderParticipants(data.participants);
-});
+/* ==========================================
+   PARTICIPANTS
+========================================== */
 
 function actionButton(label, action, targetId) {
   const button = document.createElement("button");
@@ -525,7 +691,17 @@ function renderParticipants(list) {
 
     container.appendChild(row);
   }
+
+  updateChatRecipients(participants);
 }
+
+socket.on("participants-updated", data => {
+  renderParticipants(data.participants);
+});
+
+/* ==========================================
+   WAITING ROOM
+========================================== */
 
 socket.on("waiting-updated", waiting => {
   const container = $("waitingList");
@@ -549,17 +725,182 @@ socket.on("waiting-updated", waiting => {
     actions.className = "waiting-actions";
 
     actions.appendChild(
-      actionButton("Approve", "approve-request", user.id)
+      actionButton(
+        "Approve",
+        "approve-request",
+        user.id
+      )
     );
 
     actions.appendChild(
-      actionButton("Reject", "reject-request", user.id)
+      actionButton(
+        "Reject",
+        "reject-request",
+        user.id
+      )
     );
 
     row.append(name, actions);
     container.appendChild(row);
   }
 });
+
+/* ==========================================
+   CHAT SETUP
+========================================== */
+
+const chatRecipient = $("chatRecipient");
+const chatMessages = $("chatMessages");
+const chatForm = $("chatForm");
+const chatInput = $("chatInput");
+const chatSendBtn = $("chatSendBtn");
+
+function updateChatRecipients(list) {
+  const previous = chatRecipient.value;
+  chatRecipient.replaceChildren();
+
+  const everyone = document.createElement("option");
+  everyone.value = "everyone";
+  everyone.textContent = "Everyone (Public)";
+  chatRecipient.appendChild(everyone);
+
+  for (const person of list || []) {
+    if (person.id === socket.id) continue;
+
+    const option = document.createElement("option");
+    option.value = person.id;
+    option.textContent = person.name + " (Private)";
+
+    chatRecipient.appendChild(option);
+  }
+
+  const available = [...chatRecipient.options].some(
+    option => option.value === previous
+  );
+
+  chatRecipient.value = available
+    ? previous
+    : "everyone";
+}
+
+/* ==========================================
+   DISPLAY CHAT MESSAGE
+========================================== */
+
+function displayChatMessage(message) {
+  if (!currentRoom) return;
+
+  chatMessages.querySelector(".chat-empty")?.remove();
+
+  const isMine = message.from === socket.id;
+
+  const bubble = document.createElement("div");
+  bubble.className = "chat-message";
+
+  if (isMine) bubble.classList.add("mine");
+  if (message.private) bubble.classList.add("private");
+
+  const header = document.createElement("div");
+  header.className = "chat-message-header";
+
+  const name = document.createElement("span");
+  name.className = "chat-message-name";
+  name.textContent = isMine
+    ? "You"
+    : message.fromName;
+
+  const type = document.createElement("span");
+  type.className = "chat-message-type";
+
+  if (message.private) {
+    type.textContent = isMine
+      ? "🔒 Private to " + message.toName
+      : "🔒 Private to you";
+  } else {
+    type.textContent = "Everyone";
+  }
+
+  const text = document.createElement("div");
+  text.className = "chat-message-text";
+  text.textContent = message.text;
+
+  const time = document.createElement("span");
+  time.className = "chat-message-time";
+
+  time.textContent = new Date(
+    message.timestamp
+  ).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+
+  header.append(name, type);
+  bubble.append(header, text, time);
+
+  chatMessages.appendChild(bubble);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+socket.on("chat-message", displayChatMessage);
+
+/* ==========================================
+   SEND CHAT MESSAGE
+========================================== */
+
+chatForm.addEventListener("submit", async event => {
+  event.preventDefault();
+
+  if (
+    !currentRoom ||
+    !socket.connected ||
+    $("meetingSection").hidden
+  ) {
+    status("Join a meeting to send messages.");
+    return;
+  }
+
+  const text = chatInput.value.trim();
+  if (!text) return;
+
+  chatSendBtn.disabled = true;
+
+  try {
+    const result = await request("chat-message", {
+      text,
+      to: chatRecipient.value
+    });
+
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+
+    chatInput.value = "";
+    chatInput.focus();
+  } catch (error) {
+    status("Message failed: " + error.message);
+  } finally {
+    chatSendBtn.disabled = false;
+  }
+});
+
+function clearMeetingChat() {
+  chatMessages.replaceChildren();
+
+  const empty = document.createElement("p");
+  empty.className = "chat-empty";
+  empty.textContent =
+    "No messages yet. Start a conversation!";
+
+  chatMessages.appendChild(empty);
+  updateChatRecipients([]);
+
+  chatInput.value = "";
+  chatSendBtn.disabled = false;
+}
+
+/* ==========================================
+   COPY INVITE LINK
+========================================== */
 
 $("copyBtn").onclick = async () => {
   if (!currentRoom) return;
@@ -569,11 +910,19 @@ $("copyBtn").onclick = async () => {
       meetingLink(currentRoom)
     );
 
-    status("Invite link copied. Share password separately.");
-  } catch {
+    $("copyBtn").textContent = "Copied!";
+
+    status(
+      "Invite link copied. Share password separately."
+    );
+  } catch (error) {
     status("Could not copy link.");
   }
 };
+
+/* ==========================================
+   MICROPHONE
+========================================== */
 
 $("micBtn").onclick = () => {
   const track = localStream?.getAudioTracks()[0];
@@ -586,6 +935,10 @@ $("micBtn").onclick = () => {
     : "Unmute Mic";
 };
 
+/* ==========================================
+   CAMERA
+========================================== */
+
 $("cameraBtn").onclick = () => {
   const track = localStream?.getVideoTracks()[0];
   if (!track) return;
@@ -597,12 +950,16 @@ $("cameraBtn").onclick = () => {
     : "Turn Camera On";
 };
 
+/* ==========================================
+   SCREEN SHARING
+========================================== */
+
 $("screenBtn").onclick = async () => {
   if (!currentRoom) return;
 
   try {
     if (screenStream) {
-      stopScreenShare();
+      await stopScreenShare();
       return;
     }
 
@@ -611,7 +968,8 @@ $("screenBtn").onclick = async () => {
         video: true
       });
 
-    const screenTrack = screenStream.getVideoTracks()[0];
+    const screenTrack =
+      screenStream.getVideoTracks()[0];
 
     for (const pc of peers.values()) {
       const sender = pc.getSenders().find(
@@ -628,14 +986,17 @@ $("screenBtn").onclick = async () => {
     $("screenBtn").textContent = "Stop Sharing";
     status("Screen sharing started.");
   } catch (error) {
-    status("Screen sharing unavailable: " + error.message);
+    status(
+      "Screen sharing unavailable: " + error.message
+    );
   }
 };
 
 async function stopScreenShare() {
   if (!screenStream) return;
 
-  const cameraTrack = localStream?.getVideoTracks()[0] || null;
+  const cameraTrack =
+    localStream?.getVideoTracks()[0] || null;
 
   for (const pc of peers.values()) {
     const sender = pc.getSenders().find(
@@ -647,11 +1008,15 @@ async function stopScreenShare() {
     }
   }
 
-  screenStream.getTracks().forEach(t => t.stop());
+  screenStream.getTracks().forEach(track => track.stop());
   screenStream = null;
 
   $("screenBtn").textContent = "Share Screen";
 }
+
+/* ==========================================
+   RESET MEETING
+========================================== */
 
 function resetMeeting() {
   for (const id of [...peers.keys()]) {
@@ -659,12 +1024,16 @@ function resetMeeting() {
   }
 
   if (screenStream) {
-    screenStream.getTracks().forEach(track => track.stop());
+    screenStream.getTracks().forEach(
+      track => track.stop()
+    );
     screenStream = null;
   }
 
   if (localStream) {
-    localStream.getTracks().forEach(track => track.stop());
+    localStream.getTracks().forEach(
+      track => track.stop()
+    );
     localStream = null;
   }
 
@@ -679,13 +1048,24 @@ function resetMeeting() {
   $("micBtn").textContent = "Mute Mic";
   $("cameraBtn").textContent = "Turn Camera Off";
   $("screenBtn").textContent = "Share Screen";
+  $("copyBtn").textContent = "Copy Invite Link";
 
-  socket.disconnect();
+  clearMeetingChat();
+
+  if (socket.connected) {
+    socket.disconnect();
+  }
 
   history.replaceState({}, "", "/");
 
-  showSection(currentUser ? "homeSection" : "loginSection");
+  showSection(
+    currentUser ? "homeSection" : "loginSection"
+  );
 }
+
+/* ==========================================
+   LEAVE / CANCEL
+========================================== */
 
 $("leaveBtn").onclick = () => {
   socket.emit("leave-room");
@@ -699,6 +1079,10 @@ $("cancelWaitingBtn").onclick = () => {
   status("Join request cancelled.");
 };
 
+/* ==========================================
+   DISCONNECT
+========================================== */
+
 socket.on("disconnect", () => {
   if (currentRoom) {
     resetMeeting();
@@ -706,12 +1090,89 @@ socket.on("disconnect", () => {
   }
 });
 
+/* ==========================================
+   INVITATION LINK
+========================================== */
+
 const params = new URLSearchParams(location.search);
 const invitedRoom = params.get("room");
 
 if (invitedRoom) {
   $("roomInput").value = invitedRoom;
-  status("Meeting invitation detected. Please sign in.");
+
+  status(
+    "Meeting invitation detected. Please sign in."
+  );
 }
 
+/* ==========================================
+   TRANSPARENT PASSWORD ERROR TOAST
+   RIGHT SIDE ABOVE PASSWORD INPUT
+========================================== */
+
+function showErrorToast(inputId, message) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+
+  const card = input.closest(".option-card");
+  if (!card) return;
+
+  // Remove previous notification
+  card.querySelector(":scope > .validation-tooltip")?.remove();
+
+  clearTimeout(card._toastTimer);
+  clearTimeout(card._toastRemoveTimer);
+
+  // Password input red border
+  input.classList.add("input-error");
+
+  // New toast
+  const toast = document.createElement("div");
+  toast.className = "validation-tooltip";
+  toast.setAttribute("role", "alert");
+  toast.textContent = "⚠ " + message;
+
+  card.appendChild(toast);
+
+  // Position: top-right, just above password input
+  const cardRect = card.getBoundingClientRect();
+  const inputRect = input.getBoundingClientRect();
+
+  const toastHeight = toast.getBoundingClientRect().height;
+
+  const topPosition =
+    inputRect.top -
+    cardRect.top -
+    toastHeight -
+    14;
+
+  toast.style.position = "absolute";
+  toast.style.top = Math.max(8, topPosition) + "px";
+  toast.style.bottom = "auto";
+  toast.style.left = "auto";
+  toast.style.right = "12px";
+  toast.style.zIndex = "999";
+  toast.style.maxWidth = "min(300px, calc(100% - 24px))";
+
+  // Arrow pointing down to password field
+  toast.classList.add("toast-above-input");
+
+  input.focus();
+
+  // Remove after 4 seconds
+  card._toastTimer = setTimeout(() => {
+    toast.classList.add("toast-hide");
+
+    card._toastRemoveTimer = setTimeout(() => {
+      toast.remove();
+      input.classList.remove("input-error");
+    }, 250);
+  }, 4000);
+}
+
+/* ==========================================
+   INITIALIZE
+========================================== */
+
 showSection("loginSection");
+restoreFirebaseSession();
