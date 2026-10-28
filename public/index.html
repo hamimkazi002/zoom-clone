@@ -555,6 +555,83 @@
 
   <script src="/script.js"></script>
 
+  
+<!-- Show / Hide Meeting Password -->
+<script>
+  document.querySelectorAll(
+    '#createPassword, #joinPassword'
+  ).forEach(input => {
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'password-visibility';
+
+    input.parentNode.insertBefore(wrapper, input);
+    wrapper.appendChild(input);
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'password-eye';
+    toggle.textContent = '👁';
+    toggle.setAttribute('aria-label', 'Show password');
+    toggle.setAttribute('title', 'Show password');
+
+    toggle.addEventListener('click', () => {
+      const visible = input.type === 'password';
+
+      input.type = visible ? 'text' : 'password';
+      toggle.textContent = visible ? '◉' : '👁';
+      toggle.setAttribute(
+        'aria-label',
+        visible ? 'Hide password' : 'Show password'
+      );
+    });
+
+    wrapper.appendChild(toggle);
+  });
+</script>
+
+<style>
+  .password-visibility {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .password-visibility input {
+    width: 100%;
+    padding-right: 55px;
+  }
+
+  .password-eye {
+    position: absolute;
+    top: 50%;
+    right: 9px;
+    transform: translateY(-50%);
+    z-index: 3;
+    background: transparent !important;
+    border: 0;
+    box-shadow: none !important;
+    padding: 8px 11px;
+    margin: 0 !important;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+  }
+
+  .password-eye:hover {
+    transform: translateY(-50%) !important;
+    background: rgba(150, 120, 245, 0.12) !important;
+    box-shadow: none !important;
+    color: var(--text);
+  }
+
+  .password-eye:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+</style>
+
+
   <!-- ===================================
        DARK / LIGHT MODE
   =================================== -->
