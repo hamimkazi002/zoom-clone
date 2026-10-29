@@ -8,15 +8,18 @@ const { Server } = require("socket.io");
 const { initializeApp, getApps } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 
+/* ==========================================
+   MEETSPACE SERVER CONFIGURATION
+========================================== */
+
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
 
 if (!PROJECT_ID) {
   throw new Error(
-    "Set FIREBASE_PROJECT_ID in .env / Render environment"
+    "Set FIREBASE_PROJECT_ID in .env or Render environment"
   );
 }
 
-// Firebase ID Token verification
 const firebaseApp = getApps().length
   ? getApps()[0]
   : initializeApp({ projectId: PROJECT_ID });
@@ -25,11 +28,16 @@ const firebaseAuth = getAuth(firebaseApp);
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+const io = new Server(server, {
+  maxHttpBufferSize: 3.5 * 1024 * 1024
+});
 
 const PORT = Number(process.env.PORT) || 3000;
+
 const MAX_PARTICIPANTS = 10;
 const MAX_MESSAGE_LENGTH = 2000;
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
 const rooms = new Map();
 
@@ -42,10 +50,25 @@ app.get("/health", (req, res) => {
   });
 });
 
+/* ==========================================
+   HELPERS
+========================================== */
+
 function reply(callback, data) {
   if (typeof callback === "function") {
     callback(data);
   }
+}
+
+function success(callback, data = {}) {
+  reply(callback, { ok: true, ...data });
+}
+
+function fail(callback, message) {
+  reply(callback, {
+    ok: false,
+    error: message
+  });
 }
 
 function getRoom(socket) {
@@ -56,6 +79,13 @@ function getMember(socket) {
   return getRoom(socket)?.members.get(socket.id);
 }
 
+function isModerator(member) {
+  return (
+    member?.role === "host" ||
+    member?.role === "admin"
+  );
+}
+
 function roomInfo(room) {
   return {
     roomId: room.id,
@@ -63,7 +93,8 @@ function roomInfo(room) {
       ([id, user]) => ({
         id,
         name: user.name,
-        role: user.role
+        role: user.role,
+        raisedHand: room.raisedHands.has(id)
       })
     )
   };
@@ -85,14 +116,46 @@ function updateWaiting(room) {
   );
 
   for (const [id, member] of room.members) {
-    if (
-      member.role === "host" ||
-      member.role === "admin"
-    ) {
+    if (isModerator(member)) {
       io.to(id).emit("waiting-updated", waiting);
     }
   }
 }
+
+function updateHands(room) {
+  io.to(room.id).emit("hands-updated", {
+    ids: [...room.raisedHands]
+  });
+}
+
+function updateScreenShare(room) {
+  io.to(room.id).emit("screen-share-updated", {
+    id: room.activeSharer,
+    sharing: !!room.activeSharer
+  });
+}
+
+function updateScreenRequests(room) {
+  const requests = [...room.shareRequests].map(
+    (id) => ({
+      id,
+      name: room.members.get(id)?.name || "Participant"
+    })
+  );
+
+  for (const [id, member] of room.members) {
+    if (isModerator(member)) {
+      io.to(id).emit(
+        "screen-share-requests-updated",
+        requests
+      );
+    }
+  }
+}
+
+/* ==========================================
+   PASSWORD SECURITY
+========================================== */
 
 function hashPassword(password, salt) {
   return crypto.scryptSync(password, salt, 64);
@@ -107,6 +170,86 @@ function verifyPassword(password, room) {
   );
 }
 
+/* ==========================================
+   IMAGE VALIDATION
+========================================== */
+
+function validateImage(value) {
+  if (value === undefined || value === null || value === "") {
+    return { ok: true, image: null };
+  }
+
+  if (typeof value !== "string") {
+    return { ok: false, error: "Invalid image." };
+  }
+
+  const match = value.match(
+    /^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/
+  );
+
+  if (!match) {
+    return {
+      ok: false,
+      error: "Only JPG, PNG, WEBP and GIF are supported."
+    };
+  }
+
+  const encoded = match[2];
+
+  if (encoded.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 4) {
+    return {
+      ok: false,
+      error: "Image must be 2 MB or smaller."
+    };
+  }
+
+  const buffer = Buffer.from(encoded, "base64");
+
+  if (
+    buffer.length === 0 ||
+    buffer.length > MAX_IMAGE_BYTES ||
+    buffer.toString("base64") !== encoded
+  ) {
+    return {
+      ok: false,
+      error: "Invalid or oversized image."
+    };
+  }
+
+  const type = match[1];
+
+  const validSignature =
+    type === "jpeg"
+      ? buffer.length >= 3 &&
+        buffer[0] === 0xff &&
+        buffer[1] === 0xd8 &&
+        buffer[2] === 0xff
+      : type === "png"
+        ? buffer.subarray(0, 8).equals(
+            Buffer.from("89504e470d0a1a0a", "hex")
+          )
+        : type === "gif"
+          ? ["GIF87a", "GIF89a"].includes(
+              buffer.subarray(0, 6).toString("ascii")
+            )
+          : buffer.length >= 12 &&
+            buffer.toString("ascii", 0, 4) === "RIFF" &&
+            buffer.toString("ascii", 8, 12) === "WEBP";
+
+  if (!validSignature) {
+    return {
+      ok: false,
+      error: "Image content does not match its type."
+    };
+  }
+
+  return { ok: true, image: value };
+}
+
+/* ==========================================
+   CLEANUP ON LEAVE
+========================================== */
+
 function leaveRoom(socket) {
   const room = getRoom(socket);
 
@@ -117,7 +260,7 @@ function leaveRoom(socket) {
 
   const member = room.members.get(socket.id);
 
-  // Host leaves: End the meeting for everyone
+  // Host leaving ends the whole meeting.
   if (member?.role === "host") {
     const allUsers = [
       ...room.members.keys(),
@@ -139,32 +282,45 @@ function leaveRoom(socket) {
 
     room.members.clear();
     room.waiting.clear();
+    room.raisedHands.clear();
+    room.shareRequests.clear();
+    room.shareGrants.clear();
+
     rooms.delete(room.id);
 
     console.log("Meeting ended:", room.id);
     return;
   }
 
-  // Participant or waiting user leaves
   const wasMember = room.members.delete(socket.id);
 
   room.waiting.delete(socket.id);
+  room.raisedHands.delete(socket.id);
+  room.shareRequests.delete(socket.id);
+  room.shareGrants.delete(socket.id);
 
   socket.leave(room.id);
   socket.data.roomId = null;
 
+  if (room.activeSharer === socket.id) {
+    room.activeSharer = null;
+    updateScreenShare(room);
+  }
+
   if (wasMember) {
-    socket.to(room.id).emit(
-      "user-left",
-      socket.id
-    );
+    socket.to(room.id).emit("user-left", socket.id);
   }
 
   updateParticipants(room);
   updateWaiting(room);
+  updateHands(room);
+  updateScreenRequests(room);
 }
 
-// Firebase Authentication Middleware
+/* ==========================================
+   FIREBASE AUTHENTICATION
+========================================== */
+
 io.use(async (socket, next) => {
   try {
     const credential =
@@ -197,15 +353,13 @@ io.use(async (socket, next) => {
 
     socket.data.user = {
       id: claims.uid,
-
       name: isGuest
         ? guestName
         : (
-          claims.name ||
-          claims.email ||
-          "Google User"
-        ),
-
+            claims.name ||
+            claims.email ||
+            "Google User"
+          ),
       email: claims.email || null,
       isGuest
     };
@@ -224,41 +378,48 @@ io.use(async (socket, next) => {
   }
 });
 
-// Socket.IO Connection
-io.on("connection", socket => {
+/* ==========================================
+   SOCKET.IO CONNECTION
+========================================== */
+
+io.on("connection", (socket) => {
   console.log(
     "Connected:",
-    socket.data.user.name
+    socket.data.user.name,
+    socket.id
   );
 
-  // Create Meeting
+  /* ========================================
+     CREATE ROOM
+  ======================================== */
+
   socket.on("create-room", (data = {}, callback) => {
     if (socket.data.roomId) {
-      return reply(callback, {
-        ok: false,
-        error: "Leave your current meeting first"
-      });
+      return fail(
+        callback,
+        "Leave your current meeting first"
+      );
     }
 
-    const password = String(
-      data.password || ""
-    );
+    const password =
+      typeof data.password === "string"
+        ? data.password
+        : "";
 
     if (
       password.length < 4 ||
       password.length > 64
     ) {
-      return reply(callback, {
-        ok: false,
-        error: "Password must be 4 to 64 characters"
-      });
+      return fail(
+        callback,
+        "Password must be 4 to 64 characters"
+      );
     }
 
     let roomId;
 
     do {
-      roomId =
-        crypto.randomBytes(5).toString("hex");
+      roomId = crypto.randomBytes(5).toString("hex");
     } while (rooms.has(roomId));
 
     const salt = crypto.randomBytes(16);
@@ -268,7 +429,11 @@ io.on("connection", socket => {
       salt,
       passwordHash: hashPassword(password, salt),
       members: new Map(),
-      waiting: new Map()
+      waiting: new Map(),
+      raisedHands: new Set(),
+      shareRequests: new Set(),
+      shareGrants: new Map(),
+      activeSharer: null
     };
 
     room.members.set(socket.id, {
@@ -281,57 +446,55 @@ io.on("connection", socket => {
     socket.join(roomId);
     socket.data.roomId = roomId;
 
-    reply(callback, {
-      ok: true,
+    success(callback, {
       roomId,
       role: "host",
       ...roomInfo(room)
     });
 
     updateParticipants(room);
+    updateHands(room);
   });
 
-  // Request to Join Meeting
+  /* ========================================
+     REQUEST JOIN
+  ======================================== */
+
   socket.on("request-join", (data = {}, callback) => {
     if (socket.data.roomId) {
-      return reply(callback, {
-        ok: false,
-        error: "Leave your current meeting first"
-      });
+      return fail(
+        callback,
+        "Leave your current meeting first"
+      );
     }
 
     const roomId = String(
       data.roomId || ""
     ).trim();
 
-    const password = String(
-      data.password || ""
-    );
+    const password =
+      typeof data.password === "string"
+        ? data.password
+        : "";
 
     const room = rooms.get(roomId);
 
     if (!room) {
-      return reply(callback, {
-        ok: false,
-        error: "Meeting not found"
-      });
+      return fail(callback, "Meeting not found");
     }
 
     if (!verifyPassword(password, room)) {
-      return reply(callback, {
-        ok: false,
-        error: "Incorrect meeting password"
-      });
+      return fail(
+        callback,
+        "Incorrect meeting password"
+      );
     }
 
     if (
       room.members.size + room.waiting.size >=
       MAX_PARTICIPANTS
     ) {
-      return reply(callback, {
-        ok: false,
-        error: "Meeting is full"
-      });
+      return fail(callback, "Meeting is full");
     }
 
     room.waiting.set(socket.id, {
@@ -340,45 +503,44 @@ io.on("connection", socket => {
 
     socket.data.roomId = roomId;
 
-    reply(callback, {
-      ok: true,
-      status: "waiting"
-    });
+    success(callback, { status: "waiting" });
 
     updateWaiting(room);
   });
 
-  // Approve Participant
+  /* ========================================
+     APPROVE JOIN
+  ======================================== */
+
   socket.on("approve-request", (targetId, callback) => {
     const room = getRoom(socket);
     const actor = getMember(socket);
 
-    if (
-      !room ||
-      !actor ||
-      !["host", "admin"].includes(actor.role)
-    ) {
-      return reply(callback, {
-        ok: false,
-        error: "Permission denied"
-      });
+    if (!room || !isModerator(actor)) {
+      return fail(callback, "Permission denied");
     }
 
-    const waitingUser =
-      room.waiting.get(targetId);
+    const waitingUser = room.waiting.get(targetId);
 
     if (!waitingUser) {
-      return reply(callback, {
-        ok: false,
-        error: "Request not found"
-      });
+      return fail(callback, "Request not found");
     }
 
     if (room.members.size >= MAX_PARTICIPANTS) {
-      return reply(callback, {
-        ok: false,
-        error: "Meeting is full"
-      });
+      return fail(callback, "Meeting is full");
+    }
+
+    const targetSocket =
+      io.sockets.sockets.get(targetId);
+
+    if (!targetSocket) {
+      room.waiting.delete(targetId);
+      updateWaiting(room);
+
+      return fail(
+        callback,
+        "User disconnected"
+      );
     }
 
     const existingPeers = [
@@ -391,20 +553,6 @@ io.on("connection", socket => {
       ...waitingUser,
       role: "participant"
     });
-
-    const targetSocket =
-      io.sockets.sockets.get(targetId);
-
-    if (!targetSocket) {
-      room.members.delete(targetId);
-
-      updateWaiting(room);
-
-      return reply(callback, {
-        ok: false,
-        error: "User disconnected"
-      });
-    }
 
     targetSocket.join(room.id);
 
@@ -421,31 +569,26 @@ io.on("connection", socket => {
 
     updateParticipants(room);
     updateWaiting(room);
+    updateHands(room);
+    updateScreenShare(room);
 
-    reply(callback, { ok: true });
+    success(callback);
   });
 
-  // Reject Participant
+  /* ========================================
+     REJECT JOIN
+  ======================================== */
+
   socket.on("reject-request", (targetId, callback) => {
     const room = getRoom(socket);
     const actor = getMember(socket);
 
-    if (
-      !room ||
-      !actor ||
-      !["host", "admin"].includes(actor.role)
-    ) {
-      return reply(callback, {
-        ok: false,
-        error: "Permission denied"
-      });
+    if (!room || !isModerator(actor)) {
+      return fail(callback, "Permission denied");
     }
 
     if (!room.waiting.has(targetId)) {
-      return reply(callback, {
-        ok: false,
-        error: "Request not found"
-      });
+      return fail(callback, "Request not found");
     }
 
     room.waiting.delete(targetId);
@@ -460,28 +603,24 @@ io.on("connection", socket => {
     io.to(targetId).emit("join-rejected");
 
     updateWaiting(room);
-
-    reply(callback, { ok: true });
+    success(callback);
   });
 
-  // Assign Admin
+  /* ========================================
+     ASSIGN ADMIN
+  ======================================== */
+
   socket.on("assign-admin", (targetId, callback) => {
     const room = getRoom(socket);
     const actor = getMember(socket);
-
-    const target =
-      room?.members.get(targetId);
+    const target = room?.members.get(targetId);
 
     if (
-      !actor ||
-      actor.role !== "host" ||
+      actor?.role !== "host" ||
       !target ||
       target.role === "host"
     ) {
-      return reply(callback, {
-        ok: false,
-        error: "Permission denied"
-      });
+      return fail(callback, "Permission denied");
     }
 
     target.role = "admin";
@@ -493,28 +632,26 @@ io.on("connection", socket => {
 
     updateParticipants(room);
     updateWaiting(room);
+    updateScreenRequests(room);
 
-    reply(callback, { ok: true });
+    success(callback);
   });
 
-  // Transfer Host
+  /* ========================================
+     TRANSFER HOST
+  ======================================== */
+
   socket.on("transfer-host", (targetId, callback) => {
     const room = getRoom(socket);
     const actor = getMember(socket);
-
-    const target =
-      room?.members.get(targetId);
+    const target = room?.members.get(targetId);
 
     if (
-      !actor ||
-      actor.role !== "host" ||
+      actor?.role !== "host" ||
       !target ||
       targetId === socket.id
     ) {
-      return reply(callback, {
-        ok: false,
-        error: "Permission denied"
-      });
+      return fail(callback, "Permission denied");
     }
 
     actor.role = "admin";
@@ -532,35 +669,345 @@ io.on("connection", socket => {
 
     updateParticipants(room);
     updateWaiting(room);
+    updateScreenRequests(room);
 
-    reply(callback, { ok: true });
+    success(callback);
   });
 
-  // Public + Private Meeting Chat
+  /* ========================================
+     RAISE / LOWER HAND
+  ======================================== */
+
+  socket.on("raise-hand", (data = {}, callback) => {
+    const room = getRoom(socket);
+    const member = getMember(socket);
+
+    if (!room || !member) {
+      return fail(
+        callback,
+        "Join a meeting first"
+      );
+    }
+
+    if (typeof data.raised !== "boolean") {
+      return fail(
+        callback,
+        "Invalid hand raise status"
+      );
+    }
+
+    if (data.raised) {
+      room.raisedHands.add(socket.id);
+    } else {
+      room.raisedHands.delete(socket.id);
+    }
+
+    updateHands(room);
+    updateParticipants(room);
+
+    success(callback, {
+      raised: data.raised,
+      count: room.raisedHands.size
+    });
+  });
+
+  /* ========================================
+     HOST / ADMIN MUTE
+  ======================================== */
+
+  socket.on(
+    "mute-participant",
+    (targetId, callback) => {
+      const room = getRoom(socket);
+      const actor = getMember(socket);
+      const target = room?.members.get(targetId);
+
+      if (
+        !room ||
+        !isModerator(actor) ||
+        !target ||
+        targetId === socket.id
+      ) {
+        return fail(
+          callback,
+          "Permission denied"
+        );
+      }
+
+      // A moderator can request muting.
+      // Only the participant can unmute themselves.
+      io.to(targetId).emit("force-mute", {
+        by: socket.data.user.name
+      });
+
+      success(callback);
+    }
+  );
+
+  /* ========================================
+     SCREEN SHARE REQUEST
+  ======================================== */
+
+  socket.on(
+    "request-screen-share",
+    (data = {}, callback) => {
+      const room = getRoom(socket);
+      const member = getMember(socket);
+
+      if (!room || !member) {
+        return fail(
+          callback,
+          "Join a meeting first"
+        );
+      }
+
+      if (isModerator(member)) {
+        return fail(
+          callback,
+          "Host/Admin can share directly"
+        );
+      }
+
+      if (room.activeSharer) {
+        return fail(
+          callback,
+          "Someone is already sharing"
+        );
+      }
+
+      if (room.shareRequests.has(socket.id)) {
+        return fail(
+          callback,
+          "Request already pending"
+        );
+      }
+
+      room.shareRequests.add(socket.id);
+
+      for (const [id, user] of room.members) {
+        if (isModerator(user)) {
+          io.to(id).emit(
+            "screen-share-request",
+            {
+              id: socket.id,
+              name: member.name
+            }
+          );
+        }
+      }
+
+      updateScreenRequests(room);
+      success(callback);
+    }
+  );
+
+  /* ========================================
+     APPROVE SCREEN SHARE
+  ======================================== */
+
+  socket.on(
+    "approve-screen-share",
+    (targetId, callback) => {
+      const room = getRoom(socket);
+      const actor = getMember(socket);
+
+      if (!room || !isModerator(actor)) {
+        return fail(
+          callback,
+          "Permission denied"
+        );
+      }
+
+      if (!room.shareRequests.has(targetId)) {
+        return fail(
+          callback,
+          "Screen share request not found"
+        );
+      }
+
+      if (
+        room.activeSharer &&
+        room.activeSharer !== targetId
+      ) {
+        return fail(
+          callback,
+          "Someone is already sharing"
+        );
+      }
+
+      room.shareRequests.delete(targetId);
+
+      // Approval is temporary and specific
+      // to this participant and this room.
+      room.shareGrants.set(
+        targetId,
+        Date.now() + 60000
+      );
+
+      io.to(targetId).emit(
+        "screen-share-approved"
+      );
+
+      updateScreenRequests(room);
+      success(callback);
+    }
+  );
+
+  /* ========================================
+     REJECT SCREEN SHARE
+  ======================================== */
+
+  socket.on(
+    "reject-screen-share",
+    (targetId, callback) => {
+      const room = getRoom(socket);
+      const actor = getMember(socket);
+
+      if (!room || !isModerator(actor)) {
+        return fail(
+          callback,
+          "Permission denied"
+        );
+      }
+
+      if (!room.shareRequests.has(targetId)) {
+        return fail(
+          callback,
+          "Request not found"
+        );
+      }
+
+      room.shareRequests.delete(targetId);
+      room.shareGrants.delete(targetId);
+
+      io.to(targetId).emit(
+        "screen-share-rejected"
+      );
+
+      updateScreenRequests(room);
+      success(callback);
+    }
+  );
+
+  /* ========================================
+     SCREEN SHARING STATE
+  ======================================== */
+
+  socket.on(
+    "screen-share-state",
+    (data = {}, callback) => {
+      const room = getRoom(socket);
+      const member = getMember(socket);
+
+      if (!room || !member) {
+        return fail(
+          callback,
+          "Join a meeting first"
+        );
+      }
+
+      if (typeof data.sharing !== "boolean") {
+        return fail(
+          callback,
+          "Invalid screen share state"
+        );
+      }
+
+      if (data.sharing) {
+        if (
+          room.activeSharer &&
+          room.activeSharer !== socket.id
+        ) {
+          return fail(
+            callback,
+            "Someone is already sharing"
+          );
+        }
+
+        const grantExpires =
+          room.shareGrants.get(socket.id) || 0;
+
+        if (
+          !isModerator(member) &&
+          grantExpires < Date.now() &&
+          room.activeSharer !== socket.id
+        ) {
+          return fail(
+            callback,
+            "Screen sharing requires approval"
+          );
+        }
+
+        room.activeSharer = socket.id;
+        room.shareGrants.delete(socket.id);
+
+        // All other requests are cleared
+        // when someone begins sharing.
+        for (const id of room.shareRequests) {
+          io.to(id).emit("screen-share-rejected");
+        }
+
+        room.shareRequests.clear();
+        room.shareGrants.clear();
+
+        updateScreenRequests(room);
+        updateScreenShare(room);
+
+        return success(callback);
+      }
+
+      if (room.activeSharer !== socket.id) {
+        return fail(
+          callback,
+          "You are not the screen sharer"
+        );
+      }
+
+      room.activeSharer = null;
+
+      updateScreenShare(room);
+      success(callback);
+    }
+  );
+
+  /* ========================================
+     PUBLIC / PRIVATE CHAT + IMAGE
+  ======================================== */
+
   socket.on("chat-message", (data = {}, callback) => {
     const room = getRoom(socket);
     const sender = getMember(socket);
 
     if (!room || !sender) {
-      return reply(callback, {
-        ok: false,
-        error: "Join a meeting first"
-      });
+      return fail(
+        callback,
+        "Join a meeting first"
+      );
     }
 
-    const text =
+    const messageText =
       typeof data.text === "string"
         ? data.text.trim()
         : "";
 
-    if (
-      !text ||
-      text.length > MAX_MESSAGE_LENGTH
-    ) {
-      return reply(callback, {
-        ok: false,
-        error: "Message must be 1 to 2000 characters"
-      });
+    if (messageText.length > MAX_MESSAGE_LENGTH) {
+      return fail(
+        callback,
+        "Message cannot exceed 2000 characters"
+      );
+    }
+
+    const imageResult = validateImage(data.image);
+
+    if (!imageResult.ok) {
+      return fail(callback, imageResult.error);
+    }
+
+    if (!messageText && !imageResult.image) {
+      return fail(
+        callback,
+        "Message or image required"
+      );
     }
 
     const to =
@@ -575,10 +1022,10 @@ io.on("connection", socket => {
         !room.members.has(to)
       )
     ) {
-      return reply(callback, {
-        ok: false,
-        error: "Recipient is not in this meeting"
-      });
+      return fail(
+        callback,
+        "Recipient is not in this meeting"
+      );
     }
 
     const message = {
@@ -590,20 +1037,18 @@ io.on("connection", socket => {
         to === "everyone"
           ? "Everyone"
           : room.members.get(to).name,
-      text,
+      text: messageText,
+      image: imageResult.image,
       private: to !== "everyone",
       timestamp: Date.now()
     };
 
     if (to === "everyone") {
-      // Public message: Everyone in meeting
       io.to(room.id).emit(
         "chat-message",
         message
       );
-
     } else {
-      // Private message: Sender and Receiver only
       io.to(socket.id).emit(
         "chat-message",
         message
@@ -617,13 +1062,15 @@ io.on("connection", socket => {
       }
     }
 
-    reply(callback, {
-      ok: true,
+    success(callback, {
       id: message.id
     });
   });
 
-  // WebRTC Signaling
+  /* ========================================
+     WEBRTC SIGNALING
+  ======================================== */
+
   socket.on("signal", (data = {}) => {
     const room = getRoom(socket);
 
@@ -644,12 +1091,38 @@ io.on("connection", socket => {
     });
   });
 
-  // Leave Meeting
+  /* ========================================
+     PARTICIPANT MEDIA READY
+  ======================================== */
+
+  socket.on("media-ready", () => {
+    const room = getRoom(socket);
+
+    if (
+      !room ||
+      !room.members.has(socket.id)
+    ) {
+      return;
+    }
+
+    socket.to(room.id).emit(
+      "peer-ready",
+      { id: socket.id }
+    );
+  });
+
+  /* ========================================
+     LEAVE ROOM
+  ======================================== */
+
   socket.on("leave-room", () => {
     leaveRoom(socket);
   });
 
-  // Disconnect
+  /* ========================================
+     DISCONNECT
+  ======================================== */
+
   socket.on("disconnect", () => {
     leaveRoom(socket);
 
@@ -660,7 +1133,10 @@ io.on("connection", socket => {
   });
 });
 
-// Start Server
+/* ==========================================
+   START SERVER
+========================================== */
+
 server.listen(PORT, () => {
   console.log(
     "MeetSpace server running at http://localhost:" +
@@ -668,6 +1144,15 @@ server.listen(PORT, () => {
   );
 
   console.log(
-    "Login mode: Firebase Google + Anonymous"
+    "Login: Firebase Google + Anonymous"
+  );
+
+  console.log(
+    "Maximum participants:",
+    MAX_PARTICIPANTS
+  );
+
+  console.log(
+    "Meeting moderation and image chat enabled"
   );
 });

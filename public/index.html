@@ -7,35 +7,133 @@
   <meta name="theme-color" content="#101426">
 
   <title>MeetSpace | Meet, Collaborate Without Limits</title>
-  <meta name="description" content="MeetSpace brings video meetings, live chat and screen sharing into one beautiful space.">
+
+  <meta name="description"
+    content="MeetSpace — Video meetings, real-time chat and screen sharing in one beautiful place.">
 
   <link rel="stylesheet" href="/style.css">
+
+  <style>
+    [hidden] {
+      display: none !important;
+    }
+
+    /* Hide the ENTIRE header inside an active meeting */
+    body[data-view="meeting"] #topbar {
+      display: none !important;
+    }
+
+    /* Keep all four navigation options on other pages */
+    body:not([data-view="meeting"]) #topbar {
+      display: flex !important;
+    }
+
+    body:not([data-view="meeting"]) .main-nav {
+      display: flex !important;
+    }
+
+    /* Page-specific visibility */
+    body[data-view="meeting"] #home,
+    body[data-view="waiting"] #home,
+    body[data-view="features"] #home,
+    body[data-view="support"] #home {
+      display: none !important;
+    }
+
+    body:not([data-view="features"]) #features {
+      display: none !important;
+    }
+
+    body:not([data-view="support"]) #support {
+      display: none !important;
+    }
+
+    body[data-view="meeting"] .site-footer,
+    body[data-view="waiting"] .site-footer {
+      display: none !important;
+    }
+
+    /* Create Room header option */
+    .create-room-nav {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 11px 17px;
+      border: 1px solid rgba(184,154,255,.3);
+      border-radius: 12px;
+      background: linear-gradient(115deg,#9877fa,#705bf0);
+      color: #fff !important;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .create-room-nav.active::after {
+      display: none;
+    }
+
+    /* Reduce extra space on informational pages */
+    body[data-view="features"] .features-section,
+    body[data-view="support"] .support-section {
+      margin-top: 8px !important;
+      padding-top: 0 !important;
+    }
+
+    body[data-view="features"] .container,
+    body[data-view="support"] .container {
+      padding-top: 18px !important;
+    }
+
+    .back-home {
+      margin-bottom: 16px;
+    }
+
+    @media (max-width: 650px) {
+      .main-nav {
+        flex-wrap: wrap;
+        gap: 10px 15px;
+      }
+
+      .create-room-nav {
+        padding: 9px 12px;
+        font-size: 11px;
+      }
+    }
+  </style>
 </head>
 
-<body>
+<body data-view="home">
 
-  <!-- Animated Background -->
+  <!-- ANIMATED BACKGROUND -->
   <div class="ambient ambient-one" aria-hidden="true"></div>
   <div class="ambient ambient-two" aria-hidden="true"></div>
   <div class="ambient ambient-three" aria-hidden="true"></div>
 
-  <!-- =========================================
-       STICKY HEADER
-  ========================================= -->
+  <!-- ======================================
+       MAIN HEADER
+  ======================================= -->
 
   <header class="topbar" id="topbar">
 
-    <a class="brand" href="#home" aria-label="MeetSpace Home">
+    <!-- MS LOGO -->
+    <a class="brand" href="#home" id="brandHome"
+      aria-label="MeetSpace Home">
+
       <span class="brand-icon ms-logo" aria-hidden="true">
         <svg
           viewBox="0 0 64 64"
-          width="34"
-          height="34"
+          width="40"
+          height="40"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
         >
           <defs>
-            <linearGradient id="msGradient" x1="0" y1="0" x2="64" y2="64">
+            <linearGradient
+              id="msGradient"
+              x1="0"
+              y1="0"
+              x2="64"
+              y2="64"
+            >
               <stop stop-color="#E0B5FF"/>
               <stop offset="0.48" stop-color="#A176FF"/>
               <stop offset="1" stop-color="#6479FF"/>
@@ -64,13 +162,46 @@
       </span>
     </a>
 
+    <!-- FOUR HEADER OPTIONS -->
     <nav class="main-nav" aria-label="Main navigation">
-      <a href="#home" class="nav-link active">Home</a>
-      <a href="#features" class="nav-link">Features</a>
-      <a href="#support" class="nav-link">Support</a>
+
+      <a
+        href="#home"
+        class="nav-link active"
+        data-page="home"
+      >
+        Home
+      </a>
+
+      <a
+        href="#features"
+        class="nav-link"
+        data-page="features"
+      >
+        Features
+      </a>
+
+      <a
+        href="#support"
+        class="nav-link"
+        data-page="support"
+      >
+        Support
+      </a>
+
+      <a
+        href="#create"
+        class="nav-link create-room-nav"
+        data-page="create"
+      >
+        + Create Room
+      </a>
+
     </nav>
 
+    <!-- USER + THEME -->
     <div class="header-actions">
+
       <span id="userInfo" class="user-chip">
         Not signed in
       </span>
@@ -83,19 +214,22 @@
       >
         ☀️ Light Mode
       </button>
+
     </div>
 
   </header>
 
   <main class="container">
 
-    <!-- =========================================
-         HOME / HERO
-    ========================================= -->
+    <!-- ======================================
+         HOME PAGE
+    ======================================= -->
 
     <div id="home">
 
-      <section class="landing-hero" aria-label="Welcome to MeetSpace">
+      <!-- HERO -->
+      <section class="landing-hero"
+        aria-label="Welcome to MeetSpace">
 
         <div class="hero-badge">
           <span class="live-dot"></span>
@@ -122,9 +256,9 @@
 
       </section>
 
-      <!-- =========================================
-           GOOGLE / GUEST LOGIN
-      ========================================= -->
+      <!-- ======================================
+           LOGIN SECTION
+      ======================================= -->
 
       <section id="loginSection" class="panel auth-card">
 
@@ -134,7 +268,8 @@
         </div>
 
         <div class="hero-symbol">
-          <svg viewBox="0 0 64 64" width="40" height="40" fill="none">
+          <svg viewBox="0 0 64 64"
+            width="40" height="40" fill="none">
             <path
               d="M8 47L22 17L34 39L43 20"
               stroke="currentColor"
@@ -182,19 +317,25 @@
 
         </div>
 
+        <!-- GUEST NAME -->
         <div id="guestNameSection" class="guest-form" hidden>
 
-          <label for="guestName">Your display name</label>
+          <label for="guestName">
+            Your display name
+          </label>
 
           <input
-            type="text"
             id="guestName"
+            type="text"
             placeholder="What should we call you?"
             maxlength="60"
             autocomplete="nickname"
           >
 
-          <button id="guestContinueBtn" type="button">
+          <button
+            id="guestContinueBtn"
+            type="button"
+          >
             Enter MeetSpace →
           </button>
 
@@ -206,9 +347,9 @@
 
       </section>
 
-      <!-- =========================================
-           CREATE / JOIN MEETING
-      ========================================= -->
+      <!-- ======================================
+           CREATE / JOIN ROOM
+      ======================================= -->
 
       <section id="homeSection" class="home-wrap" hidden>
 
@@ -221,7 +362,9 @@
 
           <h2>
             Your next great
-            <span class="gradient-text">conversation.</span>
+            <span class="gradient-text">
+              conversation.
+            </span>
           </h2>
 
           <p>
@@ -233,22 +376,19 @@
 
         <div class="meeting-options">
 
-          <!-- Create Meeting -->
-
+          <!-- CREATE ROOM -->
           <div class="option-card panel">
 
             <div class="feature-icon purple">
-              <svg
-                width="26"
-                height="26"
+              <svg width="26" height="26"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
                 stroke-width="1.8"
                 stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <rect x="3" y="5" width="13" height="14" rx="3"/>
+                stroke-linejoin="round">
+                <rect x="3" y="5" width="13"
+                  height="14" rx="3"/>
                 <path d="m16 10 5-3v10l-5-3"/>
               </svg>
             </div>
@@ -291,21 +431,17 @@
 
           </div>
 
-          <!-- Join Meeting -->
-
+          <!-- JOIN ROOM -->
           <div class="option-card panel">
 
             <div class="feature-icon pink">
-              <svg
-                width="26"
-                height="26"
+              <svg width="26" height="26"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
                 stroke-width="1.8"
                 stroke-linecap="round"
-                stroke-linejoin="round"
-              >
+                stroke-linejoin="round">
                 <path d="M9 12h12"/>
                 <path d="m16 7 5 5-5 5"/>
                 <path d="M3 5v14"/>
@@ -319,7 +455,9 @@
               to request access.
             </p>
 
-            <label for="roomInput">Meeting ID</label>
+            <label for="roomInput">
+              Meeting ID
+            </label>
 
             <input
               id="roomInput"
@@ -367,17 +505,26 @@
 
     </div>
 
-    <!-- =========================================
+    <!-- ======================================
          WAITING ROOM
-    ========================================= -->
+         HEADER REMAINS VISIBLE
+    ======================================= -->
 
-    <section id="waitingSection" class="panel waiting-card" hidden>
+    <section
+      id="waitingSection"
+      class="panel waiting-card"
+      hidden
+    >
 
       <div class="waiting-symbol">⌛</div>
 
-      <div class="eyebrow">ALMOST THERE</div>
+      <div class="eyebrow">
+        ALMOST THERE
+      </div>
 
-      <h2>Waiting for host approval</h2>
+      <h2>
+        Waiting for host approval
+      </h2>
 
       <p>
         Your request has been sent.
@@ -396,12 +543,14 @@
 
     </section>
 
-    <!-- =========================================
-         ACTIVE MEETING
-    ========================================= -->
+    <!-- ======================================
+         ACTIVE MEETING ROOM
+         ENTIRE HEADER HIDDEN
+    ======================================= -->
 
     <section id="meetingSection" hidden>
 
+      <!-- MEETING INFORMATION -->
       <div class="meeting-header panel">
 
         <div>
@@ -417,7 +566,9 @@
             Room ID:
             <strong id="roomText"></strong>
             ·
-            <span id="roleText">Role: Participant</span>
+            <span id="roleText">
+              Role: Participant
+            </span>
           </p>
 
         </div>
@@ -432,10 +583,10 @@
 
       </div>
 
-      <div class="meeting-layout">
+      <!-- VIDEO / PARTICIPANTS / CHAT -->
+      <div class="meeting-layout" id="meetingLayout">
 
-        <!-- Video Area -->
-
+        <!-- VIDEO STAGE -->
         <div class="video-area">
 
           <div class="video-area-heading">
@@ -446,38 +597,100 @@
             </span>
           </div>
 
-          <div id="videoGrid" class="video-grid"></div>
+          <div id="videoStage" class="video-stage">
+
+            <!-- BIG MAIN VIDEO -->
+            <div
+              id="mainVideoStage"
+              class="main-video-stage"
+              aria-label="Main video"
+            ></div>
+
+            <!-- SMALL SIDE VIDEOS -->
+            <div
+              id="videoGrid"
+              class="video-grid"
+              aria-label="Other participant videos"
+            ></div>
+
+          </div>
+
+          <!-- SCREEN SHARING STATUS -->
+          <div
+            id="screenShareBanner"
+            class="screen-share-banner"
+            hidden
+          >
+            <span id="screenShareName">
+              Someone is sharing their screen
+            </span>
+
+            <span class="small-pill">
+              Screen Sharing
+            </span>
+          </div>
 
         </div>
 
-        <!-- Participants -->
-
-        <aside class="sidebar panel">
+        <!-- PARTICIPANTS PANEL -->
+        <aside
+          id="participantsPanel"
+          class="sidebar panel"
+        >
 
           <div class="aside-heading">
-            <h3>Participants</h3>
-            <span>♧</span>
+
+            <h3>
+              Participants
+              <span id="participantCount"
+                class="participant-count"></span>
+            </h3>
+
+            <button
+              id="participantsToggle"
+              class="panel-toggle"
+              type="button"
+              aria-expanded="true"
+              aria-controls="participantsBody"
+              aria-label="Hide participants"
+            >
+              ⌃
+            </button>
+
           </div>
 
-          <div id="participantList"></div>
+          <div id="participantsBody">
 
-          <div id="hostPanel" hidden>
+            <div id="participantList"></div>
 
-            <hr>
+            <!-- HOST PANEL -->
+            <div id="hostPanel" hidden>
 
-            <h3>Waiting Room</h3>
+              <hr>
 
-            <div id="waitingList">
-              <p>No pending requests</p>
+              <h3>Waiting Room</h3>
+
+              <div id="waitingList">
+                <p>No pending requests</p>
+              </div>
+
+              <div
+                id="screenShareRequests"
+                class="share-requests"
+                aria-live="polite"
+              ></div>
+
             </div>
 
           </div>
 
         </aside>
 
-        <!-- Meeting Chat -->
-
-        <aside id="chatPanel" class="chat-panel panel">
+        <!-- CHAT PANEL -->
+        <aside
+          id="chatPanel"
+          class="chat-panel panel"
+        >
 
           <div class="chat-header">
 
@@ -490,6 +703,25 @@
 
           </div>
 
+          <!-- HAND RAISE COUNTER -->
+          <div
+            id="raisedHandsBar"
+            class="raised-hands-bar"
+            hidden
+          >
+
+            <span>✋ Raised Hands</span>
+
+            <span id="raisedHandCount">0</span>
+
+            <div
+              id="raisedHandsNames"
+              class="raised-hands-names"
+            ></div>
+
+          </div>
+
+          <!-- PRIVATE/PUBLIC RECIPIENT -->
           <div class="chat-recipient">
 
             <label for="chatRecipient">
@@ -504,6 +736,7 @@
 
           </div>
 
+          <!-- MESSAGES -->
           <div
             id="chatMessages"
             class="chat-messages"
@@ -511,19 +744,64 @@
             aria-live="polite"
             aria-relevant="additions"
           >
+
             <div class="chat-empty">
 
               <span class="empty-icon">✧</span>
 
               <p>
-                Say hello!<br>
-                <small>Messages will appear here.</small>
+                Say hello!
+                <small>
+                  Messages will appear here.
+                </small>
               </p>
 
             </div>
+
           </div>
 
+          <!-- IMAGE PREVIEW -->
+          <div
+            id="chatImagePreview"
+            class="chat-image-preview"
+            hidden
+          >
+
+            <img
+              id="chatImageThumbnail"
+              alt="Selected image preview"
+            >
+
+            <span id="chatImageFilename"></span>
+
+            <button
+              id="removeChatImageBtn"
+              type="button"
+              aria-label="Remove selected image"
+            >
+              ×
+            </button>
+
+          </div>
+
+          <!-- CHAT FORM -->
           <form id="chatForm" class="chat-form">
+
+            <input
+              id="chatImageInput"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              hidden
+            >
+
+            <button
+              id="attachImageBtn"
+              type="button"
+              title="Attach image"
+              aria-label="Attach image"
+            >
+              ▧
+            </button>
 
             <input
               id="chatInput"
@@ -531,10 +809,13 @@
               placeholder="Write a message..."
               maxlength="2000"
               autocomplete="off"
-              required
             >
 
-            <button id="chatSendBtn" type="submit">
+            <button
+              id="chatSendBtn"
+              type="submit"
+              title="Send message"
+            >
               ➤
             </button>
 
@@ -549,37 +830,112 @@
 
       </div>
 
-      <div class="meeting-controls panel">
+      <!-- ======================================
+           MEETING CONTROLS
+      ======================================= -->
 
-        <button id="micBtn" type="button">
-          🎙 Mute Mic
+      <div
+        class="meeting-controls panel"
+        id="meetingControls"
+      >
+
+        <!-- MIC -->
+        <button
+          id="micBtn"
+          class="meeting-control"
+          type="button"
+          aria-label="Mute microphone"
+        >
+          <span class="ms-control-icon">🎙</span>
+          <span class="ms-control-label">Mute</span>
         </button>
 
-        <button id="cameraBtn" type="button">
-          ◉ Turn Camera Off
+        <!-- CAMERA -->
+        <button
+          id="cameraBtn"
+          class="meeting-control"
+          type="button"
+          aria-label="Turn camera off"
+        >
+          <span class="ms-control-icon">◉</span>
+          <span class="ms-control-label">
+            Stop Video
+          </span>
         </button>
 
-        <button id="screenBtn" type="button">
-          ▣ Share Screen
+        <!-- SCREEN SHARE -->
+        <button
+          id="screenBtn"
+          class="meeting-control"
+          type="button"
+          aria-label="Share screen"
+        >
+          <span class="ms-control-icon">▣</span>
+          <span class="ms-control-label">
+            Share Screen
+          </span>
         </button>
 
+        <!-- RAISE HAND -->
+        <button
+          id="raiseHandBtn"
+          class="meeting-control"
+          type="button"
+          aria-pressed="false"
+        >
+          <span class="ms-control-icon">✋</span>
+          <span class="ms-control-label">
+            Raise Hand
+          </span>
+        </button>
+
+        <!-- CHAT TOGGLE -->
+        <button
+          id="toggleChatBtn"
+          class="meeting-control"
+          type="button"
+          aria-controls="chatPanel"
+          aria-expanded="true"
+        >
+          <span class="ms-control-icon">▤</span>
+          <span class="ms-control-label">
+            Chat
+          </span>
+        </button>
+
+        <!-- LEAVE -->
         <button
           id="leaveBtn"
-          class="danger"
+          class="meeting-control danger"
           type="button"
         >
-          Leave Meeting
+          <span class="ms-control-icon">☎</span>
+          <span class="ms-control-label">
+            Leave
+          </span>
         </button>
 
       </div>
 
+      <!-- SCREEN SHARE PERMISSION NOTICE -->
+      <div
+        id="sharePermissionNotice"
+        class="share-permission-notice"
+        role="status"
+        hidden
+      ></div>
+
     </section>
 
-    <!-- =========================================
-         FEATURES
-    ========================================= -->
+    <!-- ======================================
+         FEATURES PAGE
+    ======================================= -->
 
-    <section id="features" class="features-section">
+    <section
+      id="features"
+      class="features-section"
+      hidden
+    >
 
       <div class="section-heading">
 
@@ -589,25 +945,33 @@
 
         <h2>
           Everything you need to
-          <span class="gradient-text">stay connected.</span>
+          <span class="gradient-text">
+            stay connected.
+          </span>
         </h2>
 
         <p>
-          MeetSpace brings people, ideas and
-          conversations together.
+          MeetSpace brings people, ideas
+          and conversations together.
         </p>
 
       </div>
 
       <div class="features-grid">
 
+        <!-- VIDEO -->
         <article class="feature-card panel">
 
           <div class="feature-icon green">
-            <svg width="24" height="24" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="1.8"
-              stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="5" width="13" height="14" rx="3"/>
+            <svg width="24" height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round">
+              <rect x="3" y="5" width="13"
+                height="14" rx="3"/>
               <path d="m16 10 5-3v10l-5-3"/>
             </svg>
           </div>
@@ -624,13 +988,19 @@
 
         </article>
 
+        <!-- SCREEN SHARING -->
         <article class="feature-card panel">
 
           <div class="feature-icon blue">
-            <svg width="24" height="24" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="1.8"
-              stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="4" width="18" height="13" rx="2"/>
+            <svg width="24" height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round">
+              <rect x="3" y="4"
+                width="18" height="13" rx="2"/>
               <path d="M8 21h8M12 17v4"/>
             </svg>
           </div>
@@ -647,12 +1017,17 @@
 
         </article>
 
+        <!-- LIVE CHAT -->
         <article class="feature-card panel">
 
           <div class="feature-icon purple">
-            <svg width="24" height="24" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="1.8"
-              stroke-linecap="round" stroke-linejoin="round">
+            <svg width="24" height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round">
               <path d="M20 11.5a8.5 8.5 0 0 1-8.5 8.5 9 9 0 0 1-4-.9L3 21l1.9-4.5a8.5 8.5 0 1 1 15.1-5Z"/>
             </svg>
           </div>
@@ -669,12 +1044,17 @@
 
         </article>
 
+        <!-- HOST APPROVAL -->
         <article class="feature-card panel">
 
           <div class="feature-icon gold">
-            <svg width="24" height="24" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="1.8"
-              stroke-linecap="round" stroke-linejoin="round">
+            <svg width="24" height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>
               <path d="m9 12 2 2 4-4"/>
             </svg>
@@ -692,8 +1072,7 @@
 
         </article>
 
-        <!-- Upcoming Feature -->
-
+        <!-- COMING SOON 1 -->
         <article class="feature-card panel upcoming-card">
 
           <div class="upcoming-content" aria-hidden="true">
@@ -711,14 +1090,18 @@
           </div>
 
           <div class="coming-soon-overlay">
+
             <span class="coming-lock">⌁</span>
-            <span class="coming-soon-label">COMING SOON</span>
+
+            <span class="coming-soon-label">
+              COMING SOON
+            </span>
+
           </div>
 
         </article>
 
-        <!-- Upcoming Feature -->
-
+        <!-- COMING SOON 2 -->
         <article class="feature-card panel upcoming-card">
 
           <div class="upcoming-content" aria-hidden="true">
@@ -736,8 +1119,13 @@
           </div>
 
           <div class="coming-soon-overlay">
+
             <span class="coming-lock">✧</span>
-            <span class="coming-soon-label">COMING SOON</span>
+
+            <span class="coming-soon-label">
+              COMING SOON
+            </span>
+
           </div>
 
         </article>
@@ -746,11 +1134,15 @@
 
     </section>
 
-    <!-- =========================================
-         SUPPORT SECTION
-    ========================================= -->
+    <!-- ======================================
+         SUPPORT PAGE
+    ======================================= -->
 
-    <section id="support" class="support-section">
+    <section
+      id="support"
+      class="support-section"
+      hidden
+    >
 
       <div class="section-heading">
 
@@ -760,7 +1152,9 @@
 
         <h2>
           Need a hand?
-          <span class="gradient-text">Let's connect.</span>
+          <span class="gradient-text">
+            Let's connect.
+          </span>
         </h2>
 
         <p>
@@ -789,7 +1183,11 @@
 
         <div class="support-links">
 
-          <a class="support-link" href="tel:+8801309477511">
+          <!-- PHONE -->
+          <a
+            class="support-link"
+            href="tel:+8801309477511"
+          >
             <span class="support-link-icon">☎</span>
 
             <span class="support-link-text">
@@ -800,6 +1198,7 @@
             <span class="support-link-arrow">↗</span>
           </a>
 
+          <!-- FACEBOOK -->
           <a
             class="support-link"
             href="https://www.facebook.com/share/1G2CQvbkJF/"
@@ -816,6 +1215,7 @@
             <span class="support-link-arrow">↗</span>
           </a>
 
+          <!-- INSTAGRAM -->
           <a
             class="support-link"
             href="https://www.instagram.com/kazi.hamim?igsh=MXVmenp0aGF3OGxjdA=="
@@ -832,6 +1232,7 @@
             <span class="support-link-arrow">↗</span>
           </a>
 
+          <!-- PORTFOLIO -->
           <a
             class="support-link"
             href="https://hamimkazi002.github.io/HamimKazi/"
@@ -854,22 +1255,27 @@
 
     </section>
 
-    <!-- =========================================
-         APP STATUS
-    ========================================= -->
-
-    <p id="status" role="status" aria-live="polite">
+    <!-- GLOBAL STATUS -->
+    <p
+      id="status"
+      role="status"
+      aria-live="polite"
+    >
       Welcome to MeetSpace.
     </p>
 
   </main>
 
-  <!-- Footer -->
+  <!-- ======================================
+       FOOTER
+  ======================================= -->
 
   <footer class="site-footer">
 
     <span>
-      <strong>Meet<span class="brand-accent">Space</span></strong>
+      <strong>
+        Meet<span class="brand-accent">Space</span>
+      </strong>
       — A better space to connect.
     </span>
 
@@ -879,23 +1285,28 @@
 
   </footer>
 
-  <!-- =========================================
-       EXISTING APPLICATION SCRIPTS
-  ========================================= -->
+  <!-- ======================================
+       APPLICATION SCRIPTS
+  ======================================= -->
 
   <script src="/socket.io/socket.io.js"></script>
+
   <script src="/firebase-config.js"></script>
+
   <script type="module" src="/firebase-auth.js"></script>
+
   <script src="/script.js"></script>
 
-  <!-- =========================================
-       THEME / PASSWORD / NAVIGATION
-  ========================================= -->
+  <!-- ======================================
+       THEME + NAVIGATION + PASSWORD
+  ======================================= -->
 
   <script>
     (function () {
 
-      /* ---------- Dark / Light Mode ---------- */
+      /* ==============================
+         DARK / LIGHT MODE
+      ============================== */
 
       const themeToggle =
         document.getElementById("themeToggle");
@@ -953,12 +1364,15 @@
         applyTheme(nextTheme);
       });
 
-      /* ---------- Professional Eye Icons ---------- */
+      /* ==============================
+         PASSWORD VISIBILITY
+      ============================== */
 
       const eyeOpen = `
         <svg width="20" height="20"
           viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="1.8"
+          stroke="currentColor"
+          stroke-width="1.8"
           stroke-linecap="round"
           stroke-linejoin="round">
           <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/>
@@ -969,7 +1383,8 @@
       const eyeClosed = `
         <svg width="20" height="20"
           viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="1.8"
+          stroke="currentColor"
+          stroke-width="1.8"
           stroke-linecap="round"
           stroke-linejoin="round">
           <path d="M3 3l18 18"/>
@@ -983,11 +1398,9 @@
         "[data-password-toggle]"
       ).forEach(toggle => {
 
-        const inputId =
-          toggle.dataset.passwordToggle;
-
-        const input =
-          document.getElementById(inputId);
+        const input = document.getElementById(
+          toggle.dataset.passwordToggle
+        );
 
         if (!input) return;
 
@@ -1012,33 +1425,203 @@
               : "Show password"
           );
 
-          toggle.setAttribute(
-            "title",
-            visible
-              ? "Hide password"
-              : "Show password"
-          );
-
+          toggle.title = visible
+            ? "Hide password"
+            : "Show password";
         });
 
       });
 
-      /* ---------- Active Navbar Link ---------- */
+      /* ==============================
+         PAGE NAVIGATION
+      ============================== */
+
+      const home =
+        document.getElementById("home");
+
+      const features =
+        document.getElementById("features");
+
+      const support =
+        document.getElementById("support");
+
+      const waiting =
+        document.getElementById("waitingSection");
+
+      const meeting =
+        document.getElementById("meetingSection");
+
+      const loginSection =
+        document.getElementById("loginSection");
+
+      const homeSection =
+        document.getElementById("homeSection");
+
+      const hero =
+        document.querySelector(".landing-hero");
+
+      const topbar =
+        document.getElementById("topbar");
 
       const navLinks =
-        document.querySelectorAll(".nav-link");
+        document.querySelectorAll("[data-page]");
+
+      let publicPage = "home";
+
+      /* ==============================
+         LOGIN CHECK
+      ============================== */
+
+      function isSignedIn() {
+        return Boolean(
+          window.meetspaceAuth?.auth?.currentUser
+        );
+      }
+
+      /* ==============================
+         UPDATE CURRENT PAGE
+      ============================== */
+
+      function syncPage() {
+        const meetingActive = !meeting.hidden;
+        const waitingActive = !waiting.hidden;
+
+        let view = publicPage;
+
+        if (meetingActive) {
+          view = "meeting";
+        } else if (waitingActive) {
+          view = "waiting";
+        }
+
+        document.body.dataset.view = view;
+
+        // Hide the entire header ONLY in meeting.
+        topbar.hidden = meetingActive;
+
+        // Show correct public page.
+        home.hidden =
+          view !== "home" &&
+          view !== "create";
+
+        features.hidden = view !== "features";
+        support.hidden = view !== "support";
+
+        // Do not show homepage sections in waiting/meeting.
+        if (meetingActive || waitingActive) {
+          home.hidden = true;
+        }
+
+        // Hero only on Home.
+        hero.hidden = view !== "home";
+
+        // Create Room opens the existing form.
+        if (
+          view === "create" &&
+          !meetingActive &&
+          !waitingActive
+        ) {
+          if (isSignedIn()) {
+            loginSection.hidden = true;
+            homeSection.hidden = false;
+          } else {
+            loginSection.hidden = false;
+            homeSection.hidden = true;
+          }
+        }
+
+        // Active link in header.
+        navLinks.forEach(link => {
+          link.classList.toggle(
+            "active",
+            link.dataset.page === publicPage
+          );
+        });
+      }
+
+      /* ==============================
+         NAVIGATE
+      ============================== */
+
+      function navigate(page) {
+
+        // Navigation disabled during active meeting.
+        if (!meeting.hidden) return;
+
+        publicPage = page;
+
+        syncPage();
+
+        window.scrollTo({
+          top: 0,
+          behavior: "smooth"
+        });
+      }
+
+      /* ==============================
+         HEADER LINK EVENTS
+      ============================== */
 
       navLinks.forEach(link => {
-        link.addEventListener("click", () => {
-
-          navLinks.forEach(item => {
-            item.classList.remove("active");
-          });
-
-          link.classList.add("active");
-
+        link.addEventListener("click", event => {
+          event.preventDefault();
+          navigate(link.dataset.page);
         });
       });
+
+      /* ==============================
+         LOGO CLICK
+      ============================== */
+
+      document.getElementById("brandHome")
+        .addEventListener("click", event => {
+          event.preventDefault();
+          navigate("home");
+        });
+
+      /* ==============================
+         TRACK MEETING / WAITING
+      ============================== */
+
+      const pageObserver =
+        new MutationObserver(syncPage);
+
+      pageObserver.observe(meeting, {
+        attributes: true,
+        attributeFilter: ["hidden"]
+      });
+
+      pageObserver.observe(waiting, {
+        attributes: true,
+        attributeFilter: ["hidden"]
+      });
+
+      /* ==============================
+         AUTH STATE CHANGE
+      ============================== */
+
+      // Keep Create Room page updated after login.
+      const authObserver =
+        new MutationObserver(() => {
+          if (
+            publicPage === "create" &&
+            meeting.hidden &&
+            waiting.hidden
+          ) {
+            syncPage();
+          }
+        });
+
+      authObserver.observe(homeSection, {
+        attributes: true,
+        attributeFilter: ["hidden"]
+      });
+
+      /* ==============================
+         INITIAL NAVIGATION
+      ============================== */
+
+      syncPage();
 
     })();
   </script>
