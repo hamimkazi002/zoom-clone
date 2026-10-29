@@ -1156,3 +1156,132 @@ server.listen(PORT, () => {
     "Meeting moderation and image chat enabled"
   );
 });
+
+
+/* ==========================================
+   MEETSPACE - METERED TURN CONFIGURATION
+========================================== */
+
+const DEFAULT_ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" }
+];
+
+let cachedIceServers = null;
+let iceCacheExpiresAt = 0;
+let pendingIceRequest = null;
+
+async function getMeteredIceServers() {
+  const domain = (process.env.METERED_DOMAIN || "")
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, "");
+
+  const apiKey = process.env.METERED_TURN_API_KEY;
+
+  if (!domain || !apiKey) {
+    return DEFAULT_ICE_SERVERS;
+  }
+
+  if (!/^[a-z0-9-]+\.metered\.live$/i.test(domain)) {
+    throw new Error("Invalid Metered domain configuration");
+  }
+
+  if (cachedIceServers && Date.now() < iceCacheExpiresAt) {
+    return cachedIceServers;
+  }
+
+  if (pendingIceRequest) {
+    return pendingIceRequest;
+  }
+
+  pendingIceRequest = (async () => {
+    const url = new URL(
+      `https://${domain}/api/v1/turn/credentials`
+    );
+
+    url.searchParams.set("apiKey", apiKey);
+
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(8000)
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Metered returned HTTP ${response.status}`
+      );
+    }
+
+    const servers = await response.json();
+
+    if (
+      !Array.isArray(servers) ||
+      servers.length === 0 ||
+      !servers.every(
+        (server) =>
+          server &&
+          (typeof server.urls === "string" ||
+            (Array.isArray(server.urls) &&
+              server.urls.every(
+                (url) => typeof url === "string"
+              )))
+      )
+    ) {
+      throw new Error("Invalid ICE server response");
+    }
+
+    cachedIceServers = servers;
+    iceCacheExpiresAt = Date.now() + 5 * 60 * 1000;
+
+    return servers;
+  })();
+
+  try {
+    return await pendingIceRequest;
+  } finally {
+    pendingIceRequest = null;
+  }
+}
+
+// Requires Firebase ID token.
+// TURN API Key remains on the backend.
+app.get("/api/ice-servers", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+
+  const authorization = req.headers.authorization || "";
+  const match = authorization.match(/^Bearer (.+)$/);
+
+  if (!match) {
+    return res.status(401).json({
+      error: "Authentication required"
+    });
+  }
+
+  try {
+    await firebaseAuth.verifyIdToken(match[1]);
+  } catch {
+    return res.status(401).json({
+      error: "Invalid Firebase token"
+    });
+  }
+
+  try {
+    const iceServers = await getMeteredIceServers();
+
+    return res.json({
+      iceServers,
+      source: cachedIceServers ? "metered" : "stun"
+    });
+  } catch (error) {
+    console.error(
+      "TURN configuration failed:",
+      error.message
+    );
+
+    return res.json({
+      iceServers: DEFAULT_ICE_SERVERS,
+      source: "stun-fallback"
+    });
+  }
+});
+

@@ -35,12 +35,47 @@ const remoteStreams = new Map();
 const candidateQueues = new Map();
 const pendingOffers = new Set();
 
+
 const rtcConfig = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" }
   ]
 };
+
+// Load TURN servers securely through MeetSpace backend.
+async function loadIceServers() {
+  try {
+    const firebase = await waitForFirebase();
+    const token = await firebase.getUserToken();
+
+    const response = await fetch("/api/ice-servers", {
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      throw new Error(`ICE API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (!Array.isArray(data.iceServers) ||
+        data.iceServers.length === 0) {
+      throw new Error("No ICE servers returned");
+    }
+
+    rtcConfig.iceServers = data.iceServers;
+
+    console.log("MeetSpace ICE configuration:", data.source);
+
+  } catch (error) {
+    console.warn("TURN setup failed. Using STUN:", error);
+  }
+}
+
 
 /* ==========================================
    PROFESSIONAL SVG ICONS
@@ -352,6 +387,7 @@ async function connectSocket() {
 
   const firebase = await waitForFirebase();
   const credential = await firebase.getUserToken();
+  await loadIceServers();
 
   socket.auth = {
     name: currentUser.name,
