@@ -22,7 +22,7 @@ const ICONS = {
   mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>',
   micOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 2l20 20M9 9v2a3 3 0 0 0 5 2M15 9V5a3 3 0 0 0-6 0M5 10a7 7 0 0 0 12 5M12 17v5M8 22h8"/></svg>',
   video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="m17 10 5-3v10l-5-3"/></svg>',
-  videoOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 2l20 20M10 5h5a2 2 0 0 1 2 2v3M17 14v3a2 2 0 0 0-2 2V7m15 3 5-3v10l-5-3"/></svg>',
+  videoOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 2l20 20M10 5h5a2 2 0 0 1 2 2v3M17 14v3a2 2 0 0 0-2 2H4a2 2 0 0 1-2-2V7m15 3 5-3v10l-5-3"/></svg>',
   screen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="15" rx="2"/><path d="M8 22h8M12 18v4m-3-9 3-3 3 3m-3-3v6"/></svg>',
   chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11a9 9 0 0 1-9 9 9 9 0 0 1-4-.9L3 21l2-4a9 9 0 1 1 16-6Z"/></svg>',
   hand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 12V5a2 2 0 0 1 4 0v6m0-1V4a2 2 0 0 1 4 0v7m0-1V6a2 2 0 0 1 4 0v9M8 10a2 2 0 0 0-4 0v6c0 4 3 6 7 6h3c4 0 6-3 6-7"/></svg>',
@@ -321,7 +321,6 @@ async function joinMeeting() {
   } catch (err) { console.error(err); notify(err.message, "error"); }
   finally { btn.disabled = false; }
 }
-
 /* ==========================================================
    public/script.js — PART 2 OF 3
    Stable camera / audio / screen WebRTC and meeting UI
@@ -339,7 +338,7 @@ function videoBox(id, name, stream, screen = false) {
     video.autoplay = true;
     video.playsInline = true;
     // Audio is intentionally NOT played through video tiles.
-    // A separate audio element prevents muted camera/audio mixups.
+    // A separate <audio> element prevents muted camera/audio mixups.
     video.muted = true;
     const avatar = document.createElement("div");
     avatar.className = "ms-video-avatar";
@@ -467,6 +466,7 @@ function playRemoteAudio(id) {
   const audio = audioElements.get(id);
   if (!audio || !audio.srcObject?.getAudioTracks().length) return;
   audio.play().then(() => {
+    // Playback was allowed; no prompt necessary.
     if (audioEnableButton) {
       const all = [...audioElements.values()];
       if (all.every(el => !el.paused)) {
@@ -503,7 +503,6 @@ function removeRemoteAudio(id) {
   audioElements.delete(id);
 }
 
-/* ===== Robust WebRTC / deterministic media transceivers ===== */
 function addRemoteTrack(stream, track) {
   for (const old of stream.getTracks()) {
     if (old.kind === track.kind && old.id !== track.id) stream.removeTrack(old);
@@ -517,26 +516,20 @@ function createPeer(id) {
     id, pc, cameraStream: new MediaStream(), audioStream: new MediaStream(), screenStream: new MediaStream(),
     offered: false, isOfferer: false, makingOffer: false, restartCount: 0,
     lastRestart: 0, pendingIce: [], serial: Promise.resolve(),
-    audioTx: pc.addTransceiver("audio", { direction: "sendrecv" }),
-    cameraTx: pc.addTransceiver("video", { direction: "sendrecv" }),
-    screenTx: pc.addTransceiver("video", { direction: "sendrecv" })
+    audioTx: null, cameraTx: null, screenTx: null,
+    ready: Promise.resolve()
   };
   peers.set(id, record);
-  // Always wait for track attachment BEFORE createOffer/createAnswer.
-  record.ready = Promise.all([
-    record.audioTx.sender.replaceTrack(localStream?.getAudioTracks()[0] || null),
-    record.cameraTx.sender.replaceTrack(localStream?.getVideoTracks()[0] || null),
-    record.screenTx.sender.replaceTrack(screenStream?.getVideoTracks()[0] || null)
-  ]);
   pc.ontrack = event => {
-    // Order of the transceivers is identical on both ends:
-    // index 0=audio, index 1=camera, index 2=screen.
-    const index = pc.getTransceivers().indexOf(event.transceiver);
-    if (event.track.kind === "audio") {
+    // MID 0 = audio, MID 1 = camera, MID 2 = screen.
+    // On the answering side, the transceivers exist only AFTER
+    // setRemoteDescription, so do not rely on locally precreated indexes.
+    const mid = String(event.transceiver?.mid ?? '');
+    if (event.track.kind === 'audio') {
       addRemoteTrack(record.audioStream, event.track);
       attachRemoteAudio(id, record.audioStream);
       event.track.onunmute = () => playRemoteAudio(id);
-    } else if (index === 2) {
+    } else if (mid === '2') {
       addRemoteTrack(record.screenStream, event.track);
       event.track.onunmute = () => {
         if (activeScreenSharer === id) refreshRemoteSharing();
@@ -544,10 +537,10 @@ function createPeer(id) {
       if (activeScreenSharer === id) refreshRemoteSharing();
     } else {
       addRemoteTrack(record.cameraStream, event.track);
-      const name = participants.find(p => p.id === id)?.name || "Participant";
+      const name = participants.find(p => p.id === id)?.name || 'Participant';
       createVideo(id, name, record.cameraStream);
       event.track.onunmute = () => {
-        const el = $("video-" + id)?.querySelector("video");
+        const el = $('video-' + id)?.querySelector('video');
         el?.play().catch(() => {});
         updateVideoPlaceholders();
       };
@@ -555,28 +548,67 @@ function createPeer(id) {
   };
   pc.onicecandidate = event => {
     if (!event.candidate || !socket.connected) return;
-    socket.emit("signal", { to: id, signal: { type: "candidate", candidate: event.candidate } });
+    socket.emit('signal', {
+      to: id, signal: { type: 'candidate', candidate: event.candidate }
+    });
   };
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === "connected") {
+    if (pc.connectionState === 'connected') {
       record.restartCount = 0;
-      console.info("MeetSpace peer connected:", id);
+      console.info('MeetSpace peer connected:', id);
       playRemoteAudio(id);
     }
-    if (pc.connectionState === "failed") recoverPeer(id);
-    if (pc.connectionState === "disconnected") {
+    if (pc.connectionState === 'failed') recoverPeer(id);
+    if (pc.connectionState === 'disconnected') {
       setTimeout(() => {
-        if (peers.get(id) === record && pc.connectionState === "disconnected") recoverPeer(id);
+        if (peers.get(id) === record && pc.connectionState === 'disconnected') recoverPeer(id);
       }, 7000);
     }
   };
   pc.oniceconnectionstatechange = () => {
-    if (pc.iceConnectionState === "failed") recoverPeer(id);
+    if (pc.iceConnectionState === 'failed') recoverPeer(id);
   };
   const person = participants.find(p => p.id === id);
-  createVideo(id, person?.name || "Participant", record.cameraStream);
+  createVideo(id, person?.name || 'Participant', record.cameraStream);
   return record;
 }
+
+function prepareLocalOffer(record) {
+  if (record.audioTx && record.cameraTx && record.screenTx) return record.ready;
+  const pc = record.pc;
+  record.audioTx = pc.addTransceiver('audio', { direction: 'sendrecv' });
+  record.cameraTx = pc.addTransceiver('video', { direction: 'sendrecv' });
+  record.screenTx = pc.addTransceiver('video', { direction: 'sendrecv' });
+  record.ready = Promise.all([
+    record.audioTx.sender.replaceTrack(localStream?.getAudioTracks()[0] || null),
+    record.cameraTx.sender.replaceTrack(localStream?.getVideoTracks()[0] || null),
+    record.screenTx.sender.replaceTrack(screenStream?.getVideoTracks()[0] || null)
+  ]);
+  return record.ready;
+}
+
+async function prepareLocalAnswer(record) {
+  // setRemoteDescription(offer) creates and associates transceivers
+  // with offered MIDs. Reuse them; do NOT add another three.
+  const tx = record.pc.getTransceivers();
+  record.audioTx = tx.find(t => t.mid === '0' && t.receiver.track.kind === 'audio');
+  record.cameraTx = tx.find(t => t.mid === '1' && t.receiver.track.kind === 'video');
+  record.screenTx = tx.find(t => t.mid === '2' && t.receiver.track.kind === 'video');
+  if (!record.audioTx || !record.cameraTx || !record.screenTx) {
+    throw new Error('WebRTC media layout mismatch; expected 3 media sections');
+  }
+  // Crucial: not recvonly. Both users must SEND and RECEIVE media.
+  for (const transceiver of [record.audioTx, record.cameraTx, record.screenTx]) {
+    transceiver.direction = 'sendrecv';
+  }
+  record.ready = Promise.all([
+    record.audioTx.sender.replaceTrack(localStream?.getAudioTracks()[0] || null),
+    record.cameraTx.sender.replaceTrack(localStream?.getVideoTracks()[0] || null),
+    record.screenTx.sender.replaceTrack(screenStream?.getVideoTracks()[0] || null)
+  ]);
+  return record.ready;
+}
+
 function peerJob(record, job) {
   record.serial = record.serial.catch(() => {}).then(job);
   return record.serial;
@@ -586,7 +618,7 @@ async function flushPeerCandidates(record) {
   const candidates = record.pendingIce.splice(0);
   for (const candidate of candidates) {
     try { await record.pc.addIceCandidate(candidate); }
-    catch (err) { console.warn("ICE candidate rejected", err); }
+    catch (err) { console.warn('ICE candidate rejected', err); }
   }
 }
 async function callPeer(id, iceRestart = false) {
@@ -595,16 +627,16 @@ async function callPeer(id, iceRestart = false) {
   if (record.offered && !iceRestart) return;
   if (iceRestart && !record.isOfferer) return;
   return peerJob(record, async () => {
-    if (record.pc.signalingState === "closed") return;
-    if (record.pc.signalingState !== "stable") return;
-    await record.ready;
+    if (record.pc.signalingState === 'closed') return;
+    if (record.pc.signalingState !== 'stable') return;
+    await prepareLocalOffer(record);
     record.makingOffer = true;
     try {
       const offer = await record.pc.createOffer(iceRestart ? { iceRestart: true } : {});
       await record.pc.setLocalDescription(offer);
       record.offered = true;
       record.isOfferer = true;
-      socket.emit("signal", { to: id, signal: { type: "offer", sdp: record.pc.localDescription } });
+      socket.emit('signal', { to: id, signal: { type: 'offer', sdp: record.pc.localDescription } });
     } finally { record.makingOffer = false; }
   });
 }
@@ -618,7 +650,7 @@ function recoverPeer(id) {
   if (record.isOfferer) {
     setTimeout(() => callPeer(id, true).catch(console.error), 1500);
   } else if (socket.connected) {
-    socket.emit("media-ready");
+    socket.emit('media-ready');
   }
 }
 async function handleSignal(from, signal) {
@@ -630,32 +662,32 @@ async function handleSignal(from, signal) {
     return;
   }
   const record = createPeer(from);
-  if (signal.type === "candidate") {
+  if (signal.type === 'candidate') {
     if (record.pc.remoteDescription) {
       try { await record.pc.addIceCandidate(signal.candidate); }
-      catch (err) { console.warn("ICE candidate", err); }
-    } else {
-      record.pendingIce.push(signal.candidate);
-    }
+      catch (err) { console.warn('ICE candidate', err); }
+    } else record.pendingIce.push(signal.candidate);
     return;
   }
   return peerJob(record, async () => {
-    await record.ready;
     const pc = record.pc;
-    if (pc.signalingState === "closed") return;
-    if (signal.type === "offer") {
-      if (pc.signalingState !== "stable") {
+    if (pc.signalingState === 'closed') return;
+    if (signal.type === 'offer') {
+      if (pc.signalingState !== 'stable') {
+        // If rare simultaneous offers occur, deterministically pick a winner.
         if (socket.id > from) return;
-        await pc.setLocalDescription({ type: "rollback" });
+        await pc.setLocalDescription({ type: 'rollback' });
       }
       await pc.setRemoteDescription(signal.sdp);
+      await prepareLocalAnswer(record);
       await flushPeerCandidates(record);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       record.offered = true;
-      socket.emit("signal", { to: from, signal: { type: "answer", sdp: pc.localDescription } });
-    } else if (signal.type === "answer") {
-      if (pc.signalingState !== "have-local-offer") return;
+      record.isOfferer = false;
+      socket.emit('signal', { to: from, signal: { type: 'answer', sdp: pc.localDescription } });
+    } else if (signal.type === 'answer') {
+      if (pc.signalingState !== 'have-local-offer') return;
       await pc.setRemoteDescription(signal.sdp);
       await flushPeerCandidates(record);
     }
@@ -683,6 +715,8 @@ async function startMedia(existingPeers = []) {
     });
   } catch (err) {
     console.warn("Camera and mic together unavailable; trying independently:", err);
+    // IMPORTANT: a video-only fallback must NOT silently discard microphone.
+    // Try both devices independently and keep every track that works.
     localStream = new MediaStream();
     const audioResult = await navigator.mediaDevices.getUserMedia({ audio: {
       echoCancellation: true, noiseSuppression: true, autoGainControl: true
@@ -705,11 +739,17 @@ async function startMedia(existingPeers = []) {
   createVideo("local", currentUser.name + " (You)", localStream);
   updateControls();
   emitMediaState();
+  // The joining participant answers the offer(s) queued during permission prompt.
   for (const [id, signals] of [...earlySignals]) {
     earlySignals.delete(id);
+    // Offer MUST be applied before candidates regardless of network ordering.
     for (const signal of signals.filter(s => s.type !== "candidate")) await handleSignal(id, signal);
     for (const signal of signals.filter(s => s.type === "candidate")) await handleSignal(id, signal);
   }
+  // Most reliable: the newly admitted guest directly dials ALL existing
+  // members using the "peers" array from the server's join-approved event.
+  // This avoids relying on a lost peer-ready notification and prevents
+  // both sides making offers at once.
   for (const id of existingPeers) {
     if (id && id !== socket.id && !peers.has(id)) await callPeer(id);
   }
@@ -717,6 +757,7 @@ async function startMedia(existingPeers = []) {
     readyPeers.delete(id);
     if (id && id !== socket.id && !peers.has(id)) await callPeer(id);
   }
+  // Backwards compatibility when a server doesn't supply peer IDs.
   if (!existingPeers.length && currentRole !== "host" && socket.connected && currentRoom) {
     socket.emit("media-ready");
   }
@@ -733,6 +774,7 @@ function emitMediaState() {
 async function startScreenShare() {
   if (!currentRoom || screenStream) return;
   if (!navigator.mediaDevices?.getDisplayMedia) throw new Error("Screen sharing needs supported desktop Chrome/Edge or compatible browser");
+  // getDisplayMedia is called before any await (browser user gesture preserved).
   const captured = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
   const track = captured.getVideoTracks()[0];
   if (!track) { captured.getTracks().forEach(t => t.stop()); throw new Error("No screen track returned"); }
@@ -977,10 +1019,6 @@ function clearChat() {
   $("chatInput").value = ""; clearSelectedImage(); updateChatRecipients();
 }
 
-/* ==========================================================
-   public/script.js — PART 3 OF 3
-   Requests, time, events, controls, startup
-========================================================== */
 function updateRequestIndicator() {
   const count = [...pendingRequests.values()].filter(item => !item.consentKind).length;
   for (const id of ["roomRequestCount", "roomRequestCountTop", "roomRequestCountToolbar"]) {
@@ -1450,4 +1488,3 @@ function initializeControls() {
   status("Welcome to MeetSpace");
 }
 initializeControls();
-/* ===== END OF COMPLETE MEETSPACE SCRIPT.JS ===== */
