@@ -1,15 +1,51 @@
 
-/* ==========================================
-   MEETSPACE - COMPLETE FRONTEND SCRIPT
-   Login + Meetings + WebRTC + Controls
-========================================== */
+/* ================================================
+   MEETSPACE FINAL — SCRIPT.JS
+   PART 1 / 3
+   Navigation, Firebase, Rooms, Gallery, Media
+================================================ */
 
-const $ = (id) => document.getElementById(id);
+"use strict";
 
+const $ = id => document.getElementById(id);
 const socket = io({
   autoConnect: false,
   reconnection: false
 });
+
+const MAX_PEOPLE = 10;
+const KEYS = [
+  "mic", "camera", "share", "chat",
+  "hand", "approval", "autoEnd"
+];
+
+const DEFAULT_SETTINGS = {
+  mic: true,
+  camera: true,
+  share: false,
+  chat: true,
+  hand: true,
+  approval: true,
+  autoEnd: true
+};
+
+const rtcConfig = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" }
+  ]
+};
+
+const icons = {
+  mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>',
+  micOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 2l20 20M9 9v2a3 3 0 0 0 5 2M15 9V5a3 3 0 0 0-6 0M5 10a7 7 0 0 0 12 5M12 17v5M8 22h8"/></svg>',
+  video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="m17 10 5-3v10l-5-3"/></svg>',
+  videoOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 2l20 20M10 5h5a2 2 0 0 1 2 2v3M17 14v3a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7m15 3 5-3v10l-5-3"/></svg>',
+  screen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="15" rx="2"/><path d="M8 22h8M12 18v4m-3-9 3-3 3 3m-3-3v6"/></svg>',
+  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11a9 9 0 0 1-9 9 9 9 0 0 1-4-.9L3 21l2-4a9 9 0 1 1 16-6Z"/></svg>',
+  hand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 12V5a2 2 0 0 1 4 0v6m0-1V4a2 2 0 0 1 4 0v7m0-1V6a2 2 0 0 1 4 0v9M8 10a2 2 0 0 0-4 0v6c0 4 3 6 7 6h3c4 0 6-3 6-7"/></svg>',
+  leave: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16v3a2 2 0 0 1-2 2M2 16v3a2 2 0 0 0 2 2m-2-5a10 10 0 0 1 20 0M2 16h5l2 4-2 2m15-6h-5l-2 4 2 2"/></svg>'
+};
 
 let currentUser = null;
 let currentRoom = null;
@@ -19,142 +55,43 @@ let localStream = null;
 let screenStream = null;
 
 let participants = [];
+let currentSettings = { ...DEFAULT_SETTINGS };
+
+let meetingEndsAt = null;
+let meetingStartsAt = null;
 let isLeaving = false;
 
-let selectedMainVideo = "local";
 let activeScreenSharer = null;
+let selectedMainVideo = "local";
+
 let myHandRaised = false;
 let raisedHands = new Set();
 
+let shareGrantUntil = 0;
+let pendingPage = "home";
+let currentPage = "home";
+
+let sidebarTab = null;
 let selectedImage = null;
 let imagePreviewUrl = null;
-let chatVisible = true;
+
+let waitingRoomUsers = [];
+let screenRequests = [];
+
+const pendingRequests = new Map();
+let pausedRequestKey = null;
+let activeRequest = null;
 
 const peers = new Map();
-const remoteStreams = new Map();
-const candidateQueues = new Map();
-const pendingOffers = new Set();
+const iceQueue = new Map();
+const earlyOffers = new Map();
+const pendingPeerReady = new Set();
 
-
-const rtcConfig = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" }
-  ]
-};
-
-// Load TURN servers securely through MeetSpace backend.
-async function loadIceServers() {
-  try {
-    const firebase = await waitForFirebase();
-    const token = await firebase.getUserToken();
-
-    const response = await fetch("/api/ice-servers", {
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      throw new Error(`ICE API returned ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (!Array.isArray(data.iceServers) ||
-        data.iceServers.length === 0) {
-      throw new Error("No ICE servers returned");
-    }
-
-    rtcConfig.iceServers = data.iceServers;
-
-    console.log("MeetSpace ICE configuration:", data.source);
-
-  } catch (error) {
-    console.warn("TURN setup failed. Using STUN:", error);
-  }
-}
-
+let adjustmentMode = "add";
+let adjustmentPreset = "15";
 
 /* ==========================================
-   PROFESSIONAL SVG ICONS
-========================================== */
-
-const icons = {
-  mic: `<svg viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" stroke-width="2"
-    stroke-linecap="round" stroke-linejoin="round">
-    <rect x="9" y="2" width="6" height="12" rx="3"/>
-    <path d="M5 10a7 7 0 0 0 14 0"/>
-    <path d="M12 17v5M8 22h8"/>
-  </svg>`,
-
-  micOff: `<svg viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" stroke-width="2"
-    stroke-linecap="round" stroke-linejoin="round">
-    <path d="m2 2 20 20"/>
-    <path d="M9 9v2a3 3 0 0 0 5 2.2"/>
-    <path d="M15 9V5a3 3 0 0 0-5.8-1.1"/>
-    <path d="M5 10a7 7 0 0 0 12 4.9"/>
-    <path d="M12 17v5M8 22h8"/>
-  </svg>`,
-
-  video: `<svg viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" stroke-width="2"
-    stroke-linecap="round" stroke-linejoin="round">
-    <rect x="2" y="5" width="15" height="14" rx="2"/>
-    <path d="m17 10 5-3v10l-5-3"/>
-  </svg>`,
-
-  videoOff: `<svg viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" stroke-width="2"
-    stroke-linecap="round" stroke-linejoin="round">
-    <path d="m2 2 20 20"/>
-    <path d="M10 5h5a2 2 0 0 1 2 2v3"/>
-    <path d="M17 14v3a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7"/>
-    <path d="m17 10 5-3v10l-5-3"/>
-  </svg>`,
-
-  screen: `<svg viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" stroke-width="2"
-    stroke-linecap="round" stroke-linejoin="round">
-    <rect x="2" y="3" width="20" height="15" rx="2"/>
-    <path d="M8 22h8M12 18v4"/>
-    <path d="m9 12 3-3 3 3M12 9v6"/>
-  </svg>`,
-
-  hand: `<svg viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" stroke-width="2"
-    stroke-linecap="round" stroke-linejoin="round">
-    <path d="M8 13V5a2 2 0 0 1 4 0v6"/>
-    <path d="M12 11V4a2 2 0 0 1 4 0v7"/>
-    <path d="M16 11V6a2 2 0 0 1 4 0v9"/>
-    <path d="M8 10a2 2 0 0 0-4 0v6"/>
-    <path d="M4 16c0 4 3 6 7 6h3c4 0 6-3 6-7"/>
-  </svg>`,
-
-  chat: `<svg viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" stroke-width="2"
-    stroke-linecap="round" stroke-linejoin="round">
-    <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5"/>
-    <path d="M12.5 20a9 9 0 0 1-4-.9L3 21l1.9-4.5"/>
-    <path d="M4.9 16.5A8.5 8.5 0 1 1 21 11.5"/>
-  </svg>`,
-
-  leave: `<svg viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" stroke-width="2"
-    stroke-linecap="round" stroke-linejoin="round">
-    <path d="M22 16.5v3a2 2 0 0 1-2.2 2"/>
-    <path d="M4.2 21.5A2 2 0 0 1 2 19.5v-3"/>
-    <path d="M2 16.5a10 10 0 0 1 20 0"/>
-    <path d="M2 16.5h5l1.5 3-2 2"/>
-    <path d="M22 16.5h-5l-1.5 3 2 2"/>
-  </svg>`
-};
-
-/* ==========================================
-   STATUS + SCREEN VISIBILITY
+   STATUS / NOTIFICATIONS
 ========================================== */
 
 function status(message) {
@@ -163,92 +100,226 @@ function status(message) {
   }
 }
 
-function showSection(sectionId) {
-  const sections = [
-    "loginSection",
-    "homeSection",
-    "waitingSection",
-    "meetingSection"
-  ];
+function notify(message, kind = "info") {
+  let target = $("meetspaceToastContainer");
 
-  sections.forEach((id) => {
-    const section = $(id);
-    if (section) section.hidden = id !== sectionId;
-  });
+  if (!target) {
+    target = document.createElement("div");
+    target.id = "meetspaceToastContainer";
 
-  const meetingView =
-    sectionId === "meetingSection" ||
-    sectionId === "waitingSection";
+    target.style.cssText =
+      "position:fixed;z-index:99999;top:16px;right:16px;" +
+      "width:min(350px,calc(100vw - 32px));" +
+      "display:grid;gap:8px;pointer-events:none";
 
-  document.body.classList.toggle(
-    "meeting-view",
-    meetingView
-  );
-
-  document.body.dataset.view =
-    sectionId === "meetingSection"
-      ? "meeting"
-      : sectionId === "waitingSection"
-        ? "waiting"
-        : "home";
-
-  if ($("home")) {
-    $("home").hidden = meetingView;
+    document.body.appendChild(target);
   }
 
-  if (meetingView) {
-    window.scrollTo({ top: 0, behavior: "instant" });
+  const item = document.createElement("div");
+
+  item.setAttribute("role", "status");
+
+  item.style.cssText =
+    "padding:12px 14px;border-radius:11px;" +
+    "background:#282d45;color:#fff;border:1px solid " +
+    (
+      kind === "error"
+        ? "#df6c85"
+        : kind === "success"
+          ? "#5bd7b2"
+          : "#968bf5"
+    ) +
+    ";box-shadow:0 12px 35px #0006;" +
+    "font:600 12px system-ui";
+
+  item.textContent = message;
+  target.appendChild(item);
+
+  setTimeout(() => item.remove(), 4500);
+}
+
+function hasAuth() {
+  return Boolean(currentUser?.uid);
+}
+
+function setVisible(id, visible) {
+  if ($(id)) {
+    $(id).hidden = !visible;
   }
 }
 
 /* ==========================================
-   SERVER REQUEST
+   WEBSITE NAVIGATION
 ========================================== */
 
-function request(eventName, data, timeout = 10000) {
+function showSection(id) {
+  for (const name of [
+    "loginSection",
+    "homeSection",
+    "waitingSection",
+    "meetingSection"
+  ]) {
+    setVisible(name, name === id);
+  }
+
+  setVisible(
+    "home",
+    id !== "meetingSection" && id !== "waitingSection"
+  );
+
+  if (id === "meetingSection") {
+    document.body.dataset.view = "meeting";
+  } else if (id === "waitingSection") {
+    document.body.dataset.view = "waiting";
+  }
+}
+
+function navigate(page, keepHistory = false) {
+  if (
+    currentRoom &&
+    (
+      page === "home" ||
+      page === "join" ||
+      page === "create"
+    )
+  ) {
+    notify("Leave your current meeting first", "error");
+    return;
+  }
+
+  currentPage = page;
+
+  const isForm =
+    page === "create" || page === "join";
+
+  if (isForm && !hasAuth()) {
+    pendingPage = page;
+
+    showSection("loginSection");
+
+    setVisible("landingSection", false);
+    setVisible("homeBenefits", false);
+  } else {
+    showSection(
+      isForm ? "homeSection" : "loginSection"
+    );
+
+    setVisible("loginSection", false);
+    setVisible("homeSection", isForm);
+    setVisible("landingSection", page === "home");
+    setVisible("homeBenefits", page === "home");
+  }
+
+  setVisible(
+    "createPage",
+    page === "create" && hasAuth()
+  );
+
+  setVisible(
+    "joinPage",
+    page === "join" && hasAuth()
+  );
+
+  setVisible("features", page === "features");
+  setVisible("support", page === "support");
+
+  document.body.dataset.view = page;
+
+  document.querySelectorAll(
+    "[data-page], #mobileBottomNav button"
+  ).forEach(node => {
+    const active = node.dataset.page === page;
+
+    node.classList.toggle("active", active);
+    node.classList.toggle("is-active", active);
+
+    if (node.closest(".mobile-bottom-nav")) {
+      if (active) {
+        node.setAttribute("aria-current", "page");
+      } else {
+        node.removeAttribute("aria-current");
+      }
+    }
+  });
+
+  if (!keepHistory && page !== "meeting") {
+    const url =
+      page === "join" &&
+      new URLSearchParams(location.search).has("room")
+        ? location.pathname + location.search
+        : location.pathname;
+
+    history.replaceState({}, "", url);
+  }
+
+  window.scrollTo(0, 0);
+}
+
+/* ==========================================
+   SERVER REQUEST WITH ACKNOWLEDGEMENT
+========================================== */
+
+function request(
+  event,
+  data = {},
+  timeoutMs = 20000
+) {
   return new Promise((resolve, reject) => {
     if (!socket.connected) {
-      reject(new Error("Server is not connected."));
-      return;
+      return reject(
+        new Error("Not connected to meeting server")
+      );
     }
 
-    socket.timeout(timeout).emit(
-      eventName,
+    socket.timeout(timeoutMs).emit(
+      event,
       data,
       (error, response) => {
         if (error) {
-          reject(new Error(
-            "Server did not respond. Backend update may be required."
-          ));
-          return;
+          return reject(
+            new Error(
+              `Server did not respond to ${event}. ` +
+              "Restart the server and check its terminal."
+            )
+          );
         }
 
-        resolve(response || {
-          ok: false,
-          error: "Unknown server response."
-        });
+        if (
+          !response ||
+          typeof response.ok !== "boolean"
+        ) {
+          return reject(
+            new Error(
+              `Unexpected response from ${event}`
+            )
+          );
+        }
+
+        resolve(response);
       }
     );
   });
 }
 
 /* ==========================================
-   FIREBASE AUTH
+   FIREBASE AUTHENTICATION
 ========================================== */
 
 async function waitForFirebase() {
-  for (let attempt = 0; attempt < 80; attempt++) {
+  for (let tries = 0; tries < 100; tries++) {
     if (window.meetspaceAuth) {
       await window.meetspaceAuth.authReady;
       return window.meetspaceAuth;
     }
 
-    await new Promise((resolve) => {
-      setTimeout(resolve, 100);
-    });
+    await new Promise(
+      done => setTimeout(done, 100)
+    );
   }
 
-  throw new Error("Firebase authentication could not load.");
+  throw new Error(
+    "Firebase Auth not available. Check firebase-auth.js"
+  );
 }
 
 function savedGuestName(uid) {
@@ -261,63 +332,65 @@ function savedGuestName(uid) {
   }
 }
 
-function setUser(name, user) {
+function setUser(user, displayName) {
+  if (!user?.uid) return;
+
   currentUser = {
     uid: user.uid,
-    name,
+    name:
+      displayName ||
+      user.displayName ||
+      user.email ||
+      "Guest",
     email: user.email || null,
-    isGuest: !!user.isAnonymous
+    guest: Boolean(user.isAnonymous)
   };
 
-  $("userInfo").textContent =
-    name + (user.isAnonymous ? " (Guest)" : "");
+  if ($("userInfo")) {
+    $("userInfo").textContent =
+      currentUser.name;
+  }
 
-  showSection("homeSection");
-  status("Signed in as " + name);
+  navigate(
+    pendingPage === "home"
+      ? currentPage
+      : pendingPage,
+    true
+  );
+
+  status("Signed in as " + currentUser.name);
 }
 
-$("googleLoginBtn").addEventListener("click", async () => {
-  const button = $("googleLoginBtn");
-  button.disabled = true;
-
+async function loginGoogle() {
   try {
-    status("Signing in with Google...");
+    $("googleLoginBtn").disabled = true;
 
-    const firebase = await waitForFirebase();
-    const user = await firebase.loginWithGoogle();
+    const fb = await waitForFirebase();
+    const user = await fb.loginWithGoogle();
 
-    setUser(
-      user.displayName || user.email || "Google User",
-      user
-    );
+    setUser(user);
   } catch (error) {
-    console.error(error);
-    status("Google sign-in failed: " + error.message);
+    notify(error.message, "error");
   } finally {
-    button.disabled = false;
+    $("googleLoginBtn").disabled = false;
   }
-});
+}
 
-$("guestLoginBtn").addEventListener("click", () => {
-  $("guestNameSection").hidden = false;
-  $("guestName").focus();
-});
-
-$("guestContinueBtn").addEventListener("click", async () => {
+async function loginGuest() {
   const name = $("guestName").value.trim();
 
   if (!name) {
-    status("Please enter your name.");
-    $("guestName").focus();
-    return;
+    return notify(
+      "Enter your guest name",
+      "error"
+    );
   }
 
-  const button = $("guestContinueBtn");
-  button.disabled = true;
+  $("guestContinueBtn").disabled = true;
 
   try {
-    const firebase = await waitForFirebase();
-    const user = await firebase.loginAsGuest();
+    const fb = await waitForFirebase();
+    const user = await fb.loginAsGuest();
 
     try {
       localStorage.setItem(
@@ -326,46 +399,42 @@ $("guestContinueBtn").addEventListener("click", async () => {
       );
     } catch {}
 
-    setUser(name, user);
+    setUser(user, name);
   } catch (error) {
-    console.error(error);
-    status("Guest login failed: " + error.message);
+    notify(error.message, "error");
   } finally {
-    button.disabled = false;
+    $("guestContinueBtn").disabled = false;
   }
-});
+}
 
-$("guestName").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    $("guestContinueBtn").click();
-  }
-});
-
-async function restoreFirebaseSession() {
+async function restoreSession() {
   try {
-    const firebase = await waitForFirebase();
+    const fb = await waitForFirebase();
 
-    firebase.onAuthStateChanged(
-      firebase.auth,
-      (user) => {
+    fb.onAuthStateChanged(
+      fb.auth,
+      user => {
         if (!user || currentUser) return;
 
         if (user.isAnonymous) {
-          const name = savedGuestName(user.uid);
+          const name =
+            savedGuestName(user.uid);
 
           if (name) {
-            setUser(name, user);
+            setUser(user, name);
           } else {
             $("guestNameSection").hidden = false;
-            status("Enter your guest name.");
-          }
-          return;
-        }
 
-        setUser(
-          user.displayName || user.email || "Google User",
-          user
-        );
+            if (
+              currentPage === "create" ||
+              currentPage === "join"
+            ) {
+              showSection("loginSection");
+            }
+          }
+        } else {
+          setUser(user);
+        }
       }
     );
   } catch (error) {
@@ -375,44 +444,107 @@ async function restoreFirebaseSession() {
 }
 
 /* ==========================================
-   SOCKET CONNECTION
+   METERED TURN / SOCKET.IO CONNECTION
 ========================================== */
+
+async function loadIceServers() {
+  try {
+    const fb = await waitForFirebase();
+    const token = await fb.getUserToken();
+
+    const result = await fetch(
+      "/api/ice-servers",
+      {
+        headers: {
+          Authorization: "Bearer " + token
+        },
+        cache: "no-store"
+      }
+    );
+
+    if (!result.ok) {
+      throw new Error(
+        `ICE configuration: ${result.status}`
+      );
+    }
+
+    const data = await result.json();
+
+    if (
+      !Array.isArray(data.iceServers) ||
+      !data.iceServers.length
+    ) {
+      throw new Error(
+        "No ICE servers provided"
+      );
+    }
+
+    rtcConfig.iceServers =
+      data.iceServers;
+
+    console.info(
+      "ICE source:",
+      data.source
+    );
+  } catch (error) {
+    console.warn(
+      "TURN failed; using STUN:",
+      error
+    );
+  }
+}
 
 async function connectSocket() {
   if (socket.connected) return;
 
   if (!currentUser) {
-    throw new Error("Please sign in first.");
+    throw new Error(
+      "Sign in before joining"
+    );
   }
 
-  const firebase = await waitForFirebase();
-  const credential = await firebase.getUserToken();
-  await loadIceServers();
+  const fb = await waitForFirebase();
 
   socket.auth = {
-    name: currentUser.name,
-    credential
+    credential: await fb.getUserToken(),
+    name: currentUser.name
   };
 
+  await loadIceServers();
+
   await new Promise((resolve, reject) => {
-    const onConnect = () => {
-      socket.off("connect_error", onError);
+    const timer = setTimeout(() => {
+      socket.off("connect", done);
+      socket.off("connect_error", failed);
+
+      reject(
+        new Error(
+          "Could not connect to server"
+        )
+      );
+    }, 15000);
+
+    function done() {
+      clearTimeout(timer);
+      socket.off("connect_error", failed);
       resolve();
-    };
+    }
 
-    const onError = (error) => {
-      socket.off("connect", onConnect);
+    function failed(error) {
+      clearTimeout(timer);
+      socket.off("connect", done);
       reject(error);
-    };
+    }
 
-    socket.once("connect", onConnect);
-    socket.once("connect_error", onError);
+    socket.once("connect", done);
+    socket.once("connect_error", failed);
+
     socket.connect();
   });
 }
 
 /* ==========================================
-   MEETING HELPERS
+   MEETING ROOM HELPERS
 ========================================== */
 
 function meetingLink(roomId) {
@@ -423,225 +555,601 @@ function meetingLink(roomId) {
   );
 }
 
-function updateRole(role) {
-  currentRole = role;
-  $("roleText").textContent = "Role: " + role;
+function applyMeetingTiming(data) {
+  if (
+    Number.isFinite(Number(data?.startsAt)) &&
+    Number(data.startsAt) > 0
+  ) {
+    meetingStartsAt =
+      Number(data.startsAt);
+  }
 
-  $("hostPanel").hidden =
-    role !== "host" && role !== "admin";
+  if (
+    Number.isFinite(Number(data?.endsAt)) &&
+    Number(data.endsAt) > 0
+  ) {
+    meetingEndsAt =
+      Number(data.endsAt);
+  }
 
-  updateScreenControl();
+  renderMeetingClock();
 }
 
 function enterMeeting(roomId, role) {
   currentRoom = roomId;
+
+  currentRole =
+    role === "host"
+      ? "host"
+      : "participant";
+
   $("roomText").textContent = roomId;
 
-  updateRole(role);
+  $("roleText").textContent =
+    currentRole === "host"
+      ? "Host"
+      : "Participant";
+
   showSection("meetingSection");
+
+  setVisible("features", false);
+  setVisible("support", false);
+
+  document.body.dataset.view =
+    "meeting";
+
+  closeSidebar();
+  closeMoreMenu();
+
+  syncHostActions();
+  renderMeetingClock();
+  updateControls();
 
   history.replaceState(
     {},
     "",
     meetingLink(roomId)
   );
+
+  window.scrollTo(0, 0);
 }
 
 /* ==========================================
-   MEETING CONTROL ICON + TEXT
+   MEETING SETTINGS VALIDATION
 ========================================== */
 
-function control(id, iconName, label, isOff = false) {
-  const button = $(id);
-  if (!button) return;
+function readCreateSettings() {
+  const settings = {};
 
-  const icon = button.querySelector(".ms-control-icon");
-  const text = button.querySelector(".ms-control-label");
-
-  if (icon && text) {
-    icon.innerHTML = icons[iconName] || "";
-    text.textContent = label;
-  } else {
-    button.innerHTML =
-      `<span class="ms-control-icon">${icons[iconName] || ""}</span>` +
-      `<span class="ms-control-label"></span>`;
-
-    button.querySelector(
-      ".ms-control-label"
-    ).textContent = label;
+  for (const key of KEYS) {
+    settings[key] =
+      Boolean(
+        $("setting-" + key)?.checked
+      );
   }
 
-  button.classList.toggle("is-off", isOff);
-  button.setAttribute("aria-label", label);
+  return settings;
 }
 
-function updateMicControl() {
-  const track = localStream?.getAudioTracks()[0];
+function createMeetingPayload(password) {
+  const selected = $("meetingDuration");
 
-  $("micBtn").disabled = !track;
+  const isCustom =
+    selected.selectedOptions[0]
+      ?.dataset.custom === "true";
 
-  control(
-    "micBtn",
-    track?.enabled ? "mic" : "micOff",
-    !track ? "Mic Unavailable" :
-      track.enabled ? "Mute" : "Unmute",
-    !track?.enabled
-  );
-}
+  const raw = isCustom
+    ? $("meetingCustomDuration").value
+    : selected.value;
 
-function updateCameraControl() {
-  const track = localStream?.getVideoTracks()[0];
+  const durationMinutes = Number(raw);
 
-  $("cameraBtn").disabled = !track;
-
-  control(
-    "cameraBtn",
-    track?.enabled ? "video" : "videoOff",
-    !track ? "Camera Unavailable" :
-      track.enabled ? "Stop Video" : "Start Video",
-    !track?.enabled
-  );
-}
-
-function updateScreenControl() {
-  let label = "Share Screen";
-
-  if (screenStream) {
-    label = "Stop Sharing";
-  } else if (
-    currentRole &&
-    !["host", "admin"].includes(currentRole)
+  if (
+    raw === "" ||
+    !Number.isInteger(durationMinutes) ||
+    durationMinutes < 5 ||
+    durationMinutes > 1440
   ) {
-    label = "Request Share";
+    throw new Error(
+      "Meeting duration must be 5–1440 whole minutes"
+    );
   }
 
-  control("screenBtn", "screen", label);
+  const payload = {
+    password,
+    durationMinutes,
+    settings: readCreateSettings()
+  };
 
-  $("screenBtn").classList.toggle(
-    "is-active",
-    !!screenStream
-  );
-}
+  if (
+    $("meetingType").value === "scheduled"
+  ) {
+    const date = $("meetingDate").value;
+    const time = $("meetingTime").value;
 
-function updateHandControl() {
-  control(
-    "raiseHandBtn",
-    "hand",
-    myHandRaised ? "Lower Hand" : "Raise Hand"
-  );
+    if (!date || !time) {
+      throw new Error(
+        "Choose meeting date and start time"
+      );
+    }
 
-  $("raiseHandBtn").classList.toggle(
-    "is-active",
-    myHandRaised
-  );
+    const startsAt = new Date(
+      date + "T" + time
+    ).getTime();
 
-  $("raiseHandBtn").setAttribute(
-    "aria-pressed",
-    String(myHandRaised)
-  );
+    if (
+      !Number.isFinite(startsAt) ||
+      startsAt <= Date.now()
+    ) {
+      throw new Error(
+        "Choose a future start time"
+      );
+    }
+
+    payload.startsAt = startsAt;
+  }
+
+  return payload;
 }
 
 /* ==========================================
-   VIDEO DISPLAY
+   CREATE MEETING
 ========================================== */
 
-function createVideo(id, name, stream, isLocal = false) {
-  const elementId = "video-" + id;
-  let box = document.getElementById(elementId);
+async function createMeeting() {
+  const password =
+    $("createPassword").value;
+
+  if (
+    password.length < 4 ||
+    password.length > 64
+  ) {
+    return notify(
+      "Meeting password must be 4–64 characters",
+      "error"
+    );
+  }
+
+  const button = $("createBtn");
+  button.disabled = true;
+
+  try {
+    const payload =
+      createMeetingPayload(password);
+
+    await connectSocket();
+
+    const result = await request(
+      "create-room",
+      payload
+    );
+
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+
+    currentSettings =
+      result.settings || payload.settings;
+
+    applyMeetingTiming(result);
+
+    enterMeeting(
+      result.roomId,
+      "host"
+    );
+
+    renderParticipants(
+      result.participants || []
+    );
+
+    await startMedia();
+
+    notify(
+      "Meeting created. Share your invite link and password separately.",
+      "success"
+    );
+  } catch (error) {
+    console.error(error);
+    notify(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/* ==========================================
+   JOIN MEETING
+========================================== */
+
+async function joinMeeting() {
+  const roomId =
+    $("roomInput").value.trim();
+
+  const password =
+    $("joinPassword").value;
+
+  if (!roomId || !password) {
+    return notify(
+      "Enter Meeting ID and password",
+      "error"
+    );
+  }
+
+  const button = $("joinBtn");
+  button.disabled = true;
+
+  try {
+    await connectSocket();
+
+    currentRoom = roomId;
+
+    const result = await request(
+      "request-join",
+      { roomId, password }
+    );
+
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+
+    if (result.status === "waiting") {
+      showSection("waitingSection");
+
+      status(
+        "Waiting for host approval"
+      );
+
+      notify(
+        "Join request sent to host",
+        "success"
+      );
+    }
+
+    // Direct Join:
+    // Server also emits "join-approved".
+  } catch (error) {
+    console.error(error);
+    currentRoom = null;
+    notify(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/* ==========================================
+   SCREEN / CAMERA / WEBRTC MEDIA
+========================================== */
+
+function boxFor(id) {
+  return $("video-" + id);
+}
+
+function screenBoxFor(id) {
+  return $("share-" + id);
+}
+
+function makeVideoBox(
+  id,
+  name,
+  stream,
+  isLocal = false,
+  isScreen = false
+) {
+  const domId =
+    (isScreen ? "share-" : "video-") + id;
+
+  let box = $(domId);
 
   if (!box) {
     box = document.createElement("div");
-    box.id = elementId;
-    box.className = "video-box";
 
-    const video = document.createElement("video");
+    box.id = domId;
+    box.className = "video-box";
+    box.dataset.personId = id;
+    box.dataset.isScreen =
+      isScreen ? "yes" : "no";
+
+    const video =
+      document.createElement("video");
+
     video.autoplay = true;
     video.playsInline = true;
     video.muted = isLocal;
 
-    const label = document.createElement("span");
+    const avatar =
+      document.createElement("div");
+
+    avatar.className =
+      "ms-video-avatar";
+
+    const label =
+      document.createElement("span");
+
     label.className = "video-label";
 
-    box.append(video, label);
+    box.append(video, avatar, label);
 
-    $("videoGrid").appendChild(box);
+    if (isScreen) {
+      $("mainVideoStage").appendChild(box);
+    } else {
+      $("videoGrid").appendChild(box);
+    }
 
-    box.addEventListener("click", () => {
-      selectedMainVideo = id;
-      renderVideoLayout();
-    });
+    if (!isScreen) {
+      box.addEventListener("click", () => {
+        if (activeScreenSharer) return;
+
+        selectedMainVideo = id;
+        renderVideoLayout();
+      });
+    }
   }
 
+  box.dataset.name = name;
+
+  box.querySelector(
+    ".video-label"
+  ).textContent = name;
+
   const video = box.querySelector("video");
-  const label = box.querySelector(".video-label");
 
-  label.textContent = name;
-
-  const displayStream =
-    isLocal && screenStream
-      ? screenStream
-      : stream;
-
-  if (video.srcObject !== displayStream) {
-    video.srcObject = displayStream;
+  if (
+    stream &&
+    video.srcObject !== stream
+  ) {
+    video.srcObject = stream;
   }
 
   video.muted = isLocal;
+  video.play().catch(() => {});
 
-  video.play().catch((error) => {
-    console.warn("Media playback:", error);
-  });
-
-  renderVideoLayout();
+  return box;
 }
 
+function createVideo(
+  id,
+  name,
+  stream,
+  isLocal = false
+) {
+  const box = makeVideoBox(
+    id,
+    name,
+    stream,
+    isLocal,
+    false
+  );
+
+  updateVideoPlaceholders();
+  renderVideoLayout();
+
+  return box;
+}
+
+function createScreenVideo(id, stream) {
+  const person = participants.find(
+    item => item.id === id
+  );
+
+  const name =
+    id === "local"
+      ? currentUser?.name || "You"
+      : person?.name || "Participant";
+
+  const box = makeVideoBox(
+    id,
+    name + " (Screen)",
+    stream,
+    id === "local",
+    true
+  );
+
+  return box;
+}
+
+function updateVideoPlaceholders() {
+  document.querySelectorAll(
+    ".video-box"
+  ).forEach(box => {
+    const id = box.dataset.personId;
+    const isScreen =
+      box.dataset.isScreen === "yes";
+
+    const video =
+      box.querySelector("video");
+
+    const person = participants.find(
+      item => item.id === id
+    );
+
+    const enabled =
+      id === "local"
+        ? Boolean(
+            localStream?.getVideoTracks()[0]
+              ?.enabled
+          )
+        : person?.videoEnabled !== false;
+
+    // Camera and Screen are different tracks.
+    // Camera Off must not hide the shared screen.
+
+    const cameraOff =
+      !isScreen &&
+      (
+        !enabled ||
+        !video?.srcObject?.getVideoTracks()
+          .length
+      );
+
+    box.classList.toggle(
+      "is-camera-off",
+      cameraOff
+    );
+
+    const avatar =
+      box.querySelector(".ms-video-avatar");
+
+    if (avatar) {
+      avatar.textContent =
+        (box.dataset.name || "?")
+          .replace(/\s*\(.*?\)/g, "")
+          .trim()
+          .charAt(0)
+          .toUpperCase() || "?";
+    }
+  });
+}
+
+/* ==========================================
+   GALLERY AND FILMSTRIP LAYOUT
+========================================== */
+
 function renderVideoLayout() {
+  const stage = $("videoStage");
   const main = $("mainVideoStage");
   const grid = $("videoGrid");
 
-  if (!main || !grid) return;
+  if (!stage || !main || !grid) return;
 
-  const localBox = $("video-local");
-  const sharedId = activeScreenSharer;
+  const shareId = activeScreenSharer;
 
-  const desiredId =
-    sharedId || selectedMainVideo || "local";
+  const sharingBox = shareId
+    ? screenBoxFor(shareId)
+    : null;
 
-  const desiredBox =
-    document.getElementById("video-" + desiredId) ||
-    localBox ||
-    grid.querySelector(".video-box") ||
-    main.querySelector(".video-box");
+  const isSharing =
+    Boolean(sharingBox);
 
-  if (!desiredBox) return;
+  stage.classList.toggle(
+    "ms-sharing-view",
+    isSharing
+  );
 
-  const currentMain = main.querySelector(".video-box");
+  stage.classList.toggle(
+    "ms-gallery-view",
+    !isSharing
+  );
 
-  if (currentMain && currentMain !== desiredBox) {
-    grid.prepend(currentMain);
+  main.hidden = !isSharing;
+
+  grid.classList.toggle(
+    "ms-filmstrip",
+    isSharing
+  );
+
+  grid.classList.toggle(
+    "ms-gallery",
+    !isSharing
+  );
+
+  grid.classList.remove("ms-odd");
+
+  if (sharingBox) {
+    main.appendChild(sharingBox);
   }
 
-  if (desiredBox.parentElement !== main) {
-    main.appendChild(desiredBox);
-  }
-
-  main.querySelectorAll(".video-box").forEach((box) => {
-    if (box !== desiredBox) {
-      grid.appendChild(box);
+  main.querySelectorAll(
+    ".video-box"
+  ).forEach(box => {
+    if (box !== sharingBox) {
+      box.remove();
     }
   });
 
-  grid.querySelectorAll(".video-box").forEach((box) => {
-    box.classList.remove("is-selected");
-  });
+  const boxes = [
+    ...grid.querySelectorAll(".video-box")
+  ].filter(
+    box => box.dataset.isScreen !== "yes"
+  );
+
+  for (const box of boxes) {
+    box.classList.remove("ms-focused");
+    grid.appendChild(box);
+  }
+
+  if (isSharing) {
+    grid.style.removeProperty(
+      "--ms-gallery-columns"
+    );
+
+    grid.style.removeProperty(
+      "--ms-gallery-rows"
+    );
+  } else {
+    const count = boxes.length;
+
+    const odd =
+      count > 1 && count % 2 === 1;
+
+    const columns = odd
+      ? 3
+      : count <= 2
+        ? Math.max(1, count)
+        : count <= 4
+          ? 2
+          : count <= 6
+            ? 3
+            : count <= 8
+              ? 4
+              : 5;
+
+    const rows = odd
+      ? Math.ceil((count + 3) / 3)
+      : Math.ceil(count / columns);
+
+    grid.classList.toggle(
+      "ms-odd",
+      odd
+    );
+
+    grid.style.setProperty(
+      "--ms-gallery-columns",
+      String(columns)
+    );
+
+    grid.style.setProperty(
+      "--ms-gallery-rows",
+      String(Math.max(1, rows))
+    );
+
+    if (odd) {
+      const focus = boxes.find(
+        box =>
+          box.dataset.personId ===
+          selectedMainVideo
+      ) || boxes[0];
+
+      grid.prepend(focus);
+      focus?.classList.add("ms-focused");
+    }
+  }
+
+  if ($("galleryHeading")) {
+    $("galleryHeading").textContent =
+      isSharing
+        ? "Screen sharing"
+        : "Gallery view";
+  }
+
+  if ($("galleryHint")) {
+    $("galleryHint").textContent =
+      isSharing
+        ? "Shared content is large. Camera thumbnails are below."
+        : "Click a video to focus it when the participant count is odd.";
+  }
+
+  if ($("galleryParticipantBadge")) {
+    $("galleryParticipantBadge").textContent =
+      participants.length +
+      "/" +
+      MAX_PEOPLE +
+      " people";
+  }
+
+  updateVideoPlaceholders();
 }
 
 function showScreenBanner(name) {
-  const banner = $("screenShareBanner");
-
-  if (!banner) return;
-
-  banner.hidden = !name;
+  $("screenShareBanner").hidden = !name;
 
   if (name) {
     $("screenShareName").textContent =
@@ -649,8 +1157,49 @@ function showScreenBanner(name) {
   }
 }
 
+function refreshRemoteSharing() {
+  if (!activeScreenSharer) {
+    $("mainVideoStage").replaceChildren();
+
+    showScreenBanner(null);
+    renderVideoLayout();
+    return;
+  }
+
+  if (activeScreenSharer === "local") {
+    if (screenStream) {
+      createScreenVideo(
+        "local",
+        screenStream
+      );
+    }
+
+    showScreenBanner(
+      currentUser?.name || "You"
+    );
+  } else {
+    const record =
+      peers.get(activeScreenSharer);
+
+    createScreenVideo(
+      activeScreenSharer,
+      record?.screenStream ||
+        new MediaStream()
+    );
+
+    showScreenBanner(
+      participants.find(
+        item =>
+          item.id === activeScreenSharer
+      )?.name || "Participant"
+    );
+  }
+
+  renderVideoLayout();
+}
+
 /* ==========================================
-   CAMERA + MICROPHONE
+   CAMERA AND MICROPHONE
 ========================================== */
 
 async function startMedia() {
@@ -666,34 +1215,46 @@ async function startMedia() {
           autoGainControl: true
         }
       });
-  } catch (error) {
-    console.warn("Camera + microphone:", error);
-
+  } catch {
     try {
       localStream =
         await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false
+          video: true
         });
-
-      status("Camera enabled. Microphone unavailable.");
     } catch {
       try {
         localStream =
           await navigator.mediaDevices.getUserMedia({
-            video: false,
             audio: true
           });
-
-        status("Microphone enabled. Camera unavailable.");
       } catch {
         localStream = new MediaStream();
-        status("Allow camera and microphone permissions.");
+
+        notify(
+          "Camera and microphone unavailable. You can still watch and chat.",
+          "error"
+        );
       }
     }
   }
 
-  selectedMainVideo = "local";
+  if (currentRole !== "host") {
+    if (!currentSettings.mic) {
+      localStream
+        .getAudioTracks()
+        .forEach(track => {
+          track.enabled = false;
+        });
+    }
+
+    if (!currentSettings.camera) {
+      localStream
+        .getVideoTracks()
+        .forEach(track => {
+          track.enabled = false;
+        });
+    }
+  }
 
   createVideo(
     "local",
@@ -702,38 +1263,436 @@ async function startMedia() {
     true
   );
 
-  updateMicControl();
-  updateCameraControl();
-  updateScreenControl();
+  updateControls();
+  emitMediaState();
 
-  if (socket.connected && currentRoom) {
-    socket.emit("media-ready");
+  // Handle offers received while the browser
+  // was asking for camera/microphone permission.
+
+  for (const [id, offer] of [
+    ...earlyOffers
+  ]) {
+    earlyOffers.delete(id);
+
+    await handleSignal(id, offer);
   }
 
-  for (const id of [...pendingOffers]) {
-    pendingOffers.delete(id);
+  for (const id of [
+    ...pendingPeerReady
+  ]) {
+    pendingPeerReady.delete(id);
 
-    callPeer(id).catch((error) => {
-      console.error("Deferred connection:", error);
-    });
+    await callPeer(id);
+  }
+
+  if (
+    socket.connected &&
+    currentRoom
+  ) {
+    socket.emit("media-ready");
   }
 }
 
+function emitMediaState() {
+  if (
+    !currentRoom ||
+    !socket.connected
+  ) return;
+
+  socket.emit("media-state", {
+    micEnabled: Boolean(
+      localStream?.getAudioTracks()[0]
+        ?.enabled
+    ),
+    videoEnabled: Boolean(
+      localStream?.getVideoTracks()[0]
+        ?.enabled
+    )
+  });
+}
+
+/* END OF PART 1
+   CONTINUE WITH PART 2 BELOW THIS LINE */
+
+/* ================================================
+   MEETSPACE FINAL — SCRIPT.JS
+   PART 2 / 3
+   WEBRTC + SCREEN SHARE + PANEL + CHAT
+================================================ */
+
 /* ==========================================
-   WEBRTC CONNECTIONS
+   WEBRTC CONNECTION — THREE TRANSCEIVERS
+   1. AUDIO
+   2. CAMERA
+   3. SCREEN SHARING
 ========================================== */
 
-function removePeer(id) {
-  const peer = peers.get(id);
+function createPeer(id) {
+  if (peers.has(id)) {
+    return peers.get(id);
+  }
 
-  if (peer) peer.close();
+  const pc =
+    new RTCPeerConnection(rtcConfig);
+
+  const record = {
+    pc,
+
+    audio: pc.addTransceiver(
+      "audio",
+      { direction: "sendrecv" }
+    ),
+
+    camera: pc.addTransceiver(
+      "video",
+      { direction: "sendrecv" }
+    ),
+
+    screen: pc.addTransceiver(
+      "video",
+      { direction: "sendrecv" }
+    ),
+
+    cameraStream: new MediaStream(),
+    screenStream: new MediaStream(),
+    offering: false
+  };
+
+  peers.set(id, record);
+  iceQueue.set(id, []);
+
+  const putTrack = (
+    transceiver,
+    track
+  ) => {
+    transceiver.sender
+      .replaceTrack(track || null)
+      .catch(error => {
+        console.error(
+          "replaceTrack:",
+          error
+        );
+      });
+  };
+
+  putTrack(
+    record.audio,
+    localStream?.getAudioTracks()[0]
+  );
+
+  putTrack(
+    record.camera,
+    localStream?.getVideoTracks()[0]
+  );
+
+  putTrack(
+    record.screen,
+    screenStream?.getVideoTracks()[0]
+  );
+
+  pc.ontrack = event => {
+    const transceiver =
+      event.transceiver;
+
+    if (transceiver === record.audio) {
+      const exists =
+        record.cameraStream
+          .getAudioTracks()
+          .some(
+            track =>
+              track.id === event.track.id
+          );
+
+      if (!exists) {
+        record.cameraStream.addTrack(
+          event.track
+        );
+      }
+    } else if (
+      transceiver === record.camera
+    ) {
+      const exists =
+        record.cameraStream
+          .getVideoTracks()
+          .some(
+            track =>
+              track.id === event.track.id
+          );
+
+      if (!exists) {
+        record.cameraStream.addTrack(
+          event.track
+        );
+      }
+    } else if (
+      transceiver === record.screen
+    ) {
+      const exists =
+        record.screenStream
+          .getVideoTracks()
+          .some(
+            track =>
+              track.id === event.track.id
+          );
+
+      if (!exists) {
+        record.screenStream.addTrack(
+          event.track
+        );
+      }
+
+      event.track.onunmute = () => {
+        if (activeScreenSharer === id) {
+          refreshRemoteSharing();
+        }
+      };
+    }
+
+    const name =
+      participants.find(
+        person => person.id === id
+      )?.name || "Participant";
+
+    createVideo(
+      id,
+      name,
+      record.cameraStream
+    );
+
+    if (activeScreenSharer === id) {
+      refreshRemoteSharing();
+    }
+  };
+
+  pc.onicecandidate = event => {
+    if (
+      event.candidate &&
+      socket.connected
+    ) {
+      socket.emit(
+        "signal",
+        {
+          to: id,
+          signal: {
+            type: "candidate",
+            candidate: event.candidate
+          }
+        }
+      );
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (
+      pc.connectionState === "failed"
+    ) {
+      console.warn(
+        "Peer connection failed:",
+        id
+      );
+    }
+  };
+
+  createVideo(
+    id,
+    participants.find(
+      person => person.id === id
+    )?.name || "Participant",
+    record.cameraStream
+  );
+
+  return record;
+}
+
+async function callPeer(id) {
+  if (
+    !id ||
+    id === socket.id ||
+    !currentRoom ||
+    peers.has(id)
+  ) {
+    return;
+  }
+
+  if (!localStream) {
+    pendingPeerReady.add(id);
+    return;
+  }
+
+  const record = createPeer(id);
+
+  try {
+    record.offering = true;
+
+    const offer =
+      await record.pc.createOffer();
+
+    await record.pc.setLocalDescription(
+      offer
+    );
+
+    socket.emit(
+      "signal",
+      {
+        to: id,
+        signal: {
+          type: "offer",
+          sdp: record.pc.localDescription
+        }
+      }
+    );
+  } catch (error) {
+    console.error(
+      "Sending offer:",
+      error
+    );
+  } finally {
+    record.offering = false;
+  }
+}
+
+async function flushCandidates(id) {
+  const record = peers.get(id);
+
+  if (
+    !record?.pc.remoteDescription
+  ) return;
+
+  const queued =
+    iceQueue.get(id) || [];
+
+  iceQueue.set(id, []);
+
+  for (const ice of queued) {
+    try {
+      await record.pc.addIceCandidate(
+        ice
+      );
+    } catch (error) {
+      console.warn(
+        "ICE candidate:",
+        error
+      );
+    }
+  }
+}
+
+async function handleSignal(from, signal) {
+  if (
+    !signal ||
+    !from ||
+    !currentRoom
+  ) return;
+
+  if (
+    !localStream &&
+    signal.type === "offer"
+  ) {
+    earlyOffers.set(from, signal);
+    return;
+  }
+
+  if (
+    !localStream &&
+    signal.type === "candidate"
+  ) {
+    const list =
+      iceQueue.get(from) || [];
+
+    list.push(signal.candidate);
+    iceQueue.set(from, list);
+    return;
+  }
+
+  const oldCandidates =
+    iceQueue.get(from) || [];
+
+  const record = createPeer(from);
+  const pc = record.pc;
+
+  if (
+    oldCandidates.length &&
+    !iceQueue.get(from)?.length
+  ) {
+    iceQueue.set(
+      from,
+      oldCandidates
+    );
+  }
+
+  try {
+    if (signal.type === "offer") {
+      await pc.setRemoteDescription(
+        signal.sdp
+      );
+
+      await flushCandidates(from);
+
+      const answer =
+        await pc.createAnswer();
+
+      await pc.setLocalDescription(
+        answer
+      );
+
+      socket.emit(
+        "signal",
+        {
+          to: from,
+          signal: {
+            type: "answer",
+            sdp: pc.localDescription
+          }
+        }
+      );
+    } else if (
+      signal.type === "answer"
+    ) {
+      await pc.setRemoteDescription(
+        signal.sdp
+      );
+
+      await flushCandidates(from);
+    } else if (
+      signal.type === "candidate"
+    ) {
+      if (pc.remoteDescription) {
+        await pc.addIceCandidate(
+          signal.candidate
+        );
+      } else {
+        iceQueue.get(from).push(
+          signal.candidate
+        );
+      }
+    }
+  } catch (error) {
+    console.error(
+      "WebRTC signal error:",
+      error
+    );
+
+    status(
+      "Video connection issue: " +
+      error.message
+    );
+  }
+}
+
+function removePeer(id) {
+  const record = peers.get(id);
+
+  if (record) {
+    record.pc.close();
+  }
 
   peers.delete(id);
-  remoteStreams.delete(id);
-  candidateQueues.delete(id);
-  pendingOffers.delete(id);
+  iceQueue.delete(id);
+  earlyOffers.delete(id);
+  pendingPeerReady.delete(id);
 
-  $("video-" + id)?.remove();
+  boxFor(id)?.remove();
+  screenBoxFor(id)?.remove();
 
   if (selectedMainVideo === id) {
     selectedMainVideo = "local";
@@ -741,1045 +1700,117 @@ function removePeer(id) {
 
   if (activeScreenSharer === id) {
     activeScreenSharer = null;
-    showScreenBanner(null);
   }
 
-  renderVideoLayout();
-}
-
-function createPeer(id) {
-  if (peers.has(id)) {
-    return peers.get(id);
-  }
-
-  const peer = new RTCPeerConnection(rtcConfig);
-
-  peers.set(id, peer);
-  candidateQueues.set(id, []);
-
-  const remoteStream = new MediaStream();
-
-  remoteStreams.set(id, remoteStream);
-
-  const person = participants.find(
-    (item) => item.id === id
-  );
-
-  const name = person?.name || "Participant";
-
-  createVideo(id, name, remoteStream);
-
-  if (localStream) {
-    localStream.getTracks().forEach((track) => {
-      peer.addTrack(track, localStream);
-    });
-  }
-
-  peer.ontrack = (event) => {
-    const tracks =
-      event.streams[0]?.getTracks() ||
-      [event.track];
-
-    tracks.forEach((track) => {
-      const exists =
-        remoteStream.getTracks().some(
-          (existing) => existing.id === track.id
-        );
-
-      if (!exists) {
-        remoteStream.addTrack(track);
-      }
-    });
-
-    createVideo(id, name, remoteStream);
-
-    const video = $("video-" + id)?.querySelector(
-      "video"
-    );
-
-    if (video) {
-      video.muted = false;
-
-      video.play().catch(() => {
-        status(
-          "Click the participant video to enable sound."
-        );
-      });
-    }
-  };
-
-  peer.onicecandidate = (event) => {
-    if (!event.candidate) return;
-
-    socket.emit("signal", {
-      to: id,
-      signal: {
-        type: "candidate",
-        candidate: event.candidate
-      }
-    });
-  };
-
-  peer.onconnectionstatechange = () => {
-    if (peer.connectionState === "failed") {
-      console.warn("WebRTC connection failed:", id);
-
-      status(
-        "A video connection failed. A TURN server may be needed."
-      );
-    }
-  };
-
-  return peer;
-}
-
-async function callPeer(id) {
-  if (
-    !currentRoom ||
-    !id ||
-    id === socket.id ||
-    peers.has(id)
-  ) {
-    return;
-  }
-
-  if (!localStream) {
-    pendingOffers.add(id);
-    return;
-  }
-
-  const peer = createPeer(id);
-
-  const offer = await peer.createOffer();
-
-  await peer.setLocalDescription(offer);
-
-  socket.emit("signal", {
-    to: id,
-    signal: {
-      type: "offer",
-      sdp: peer.localDescription
-    }
-  });
-}
-
-async function flushCandidates(id, peer) {
-  if (!peer.remoteDescription) return;
-
-  const queue = candidateQueues.get(id) || [];
-
-  candidateQueues.set(id, []);
-
-  for (const candidate of queue) {
-    await peer.addIceCandidate(candidate);
-  }
-}
-
-socket.on("signal", async ({ from, signal } = {}) => {
-  if (!currentRoom || !signal || !from) return;
-
-  if (!localStream) {
-    console.warn("Received signaling before local media");
-    return;
-  }
-
-  try {
-    const peer = createPeer(from);
-
-    if (signal.type === "offer") {
-      await peer.setRemoteDescription(signal.sdp);
-      await flushCandidates(from, peer);
-
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-
-      socket.emit("signal", {
-        to: from,
-        signal: {
-          type: "answer",
-          sdp: peer.localDescription
-        }
-      });
-    }
-
-    if (signal.type === "answer") {
-      await peer.setRemoteDescription(signal.sdp);
-      await flushCandidates(from, peer);
-    }
-
-    if (signal.type === "candidate") {
-      if (peer.remoteDescription) {
-        await peer.addIceCandidate(signal.candidate);
-      } else {
-        candidateQueues.get(from).push(
-          signal.candidate
-        );
-      }
-    }
-  } catch (error) {
-    console.error("WebRTC signaling:", error);
-    status("Video connection issue: " + error.message);
-  }
-});
-
-socket.on("peer-ready", ({ id } = {}) => {
-  if (!currentRoom || !id) return;
-
-  callPeer(id).catch((error) => {
-    console.error("Peer connection:", error);
-  });
-});
-
-/* ==========================================
-   CREATE MEETING
-========================================== */
-
-function showErrorToast(inputId, message) {
-  const input = $(inputId);
-  const card = input?.closest(".option-card");
-
-  if (!card) {
-    status(message);
-    return;
-  }
-
-  card.querySelector(".validation-tooltip")?.remove();
-
-  input.classList.add("input-error");
-
-  const toast = document.createElement("div");
-  toast.className = "validation-tooltip";
-  toast.setAttribute("role", "alert");
-  toast.textContent = "⚠ " + message;
-
-  card.appendChild(toast);
-
-  const cardRect = card.getBoundingClientRect();
-  const inputRect = input.getBoundingClientRect();
-
-  const toastHeight = toast.getBoundingClientRect().height;
-
-  toast.style.top = Math.max(
-    8,
-    inputRect.top - cardRect.top - toastHeight - 13
-  ) + "px";
-
-  toast.style.right = "12px";
-
-  input.focus();
-
-  setTimeout(() => {
-    toast.classList.add("toast-hide");
-
-    setTimeout(() => {
-      toast.remove();
-      input.classList.remove("input-error");
-    }, 250);
-  }, 4000);
-}
-
-$("createBtn").addEventListener("click", async () => {
-  const password = $("createPassword").value;
-
-  if (password.length < 4 || password.length > 64) {
-    showErrorToast(
-      "createPassword",
-      "Password must be between 4 and 64 characters."
-    );
-    return;
-  }
-
-  const button = $("createBtn");
-  button.disabled = true;
-
-  try {
-    status("Creating your meeting...");
-
-    await connectSocket();
-
-    const result = await request(
-      "create-room",
-      { password }
-    );
-
-    if (!result.ok) {
-      throw new Error(result.error);
-    }
-
-    enterMeeting(result.roomId, "host");
-
-    renderParticipants(result.participants || []);
-
-    await startMedia();
-
-    status(
-      "Meeting created. Share the invite link and password."
-    );
-  } catch (error) {
-    console.error(error);
-    status(error.message);
-  } finally {
-    button.disabled = false;
-  }
-});
-
-/* ==========================================
-   JOIN MEETING
-========================================== */
-
-$("joinBtn").addEventListener("click", async () => {
-  const roomId = $("roomInput").value.trim();
-  const password = $("joinPassword").value;
-
-  if (!roomId) {
-    status("Please enter a Meeting ID.");
-    $("roomInput").focus();
-    return;
-  }
-
-  if (!password) {
-    showErrorToast(
-      "joinPassword",
-      "Please enter the meeting password."
-    );
-    return;
-  }
-
-  const button = $("joinBtn");
-  button.disabled = true;
-
-  try {
-    status("Sending join request...");
-
-    await connectSocket();
-
-    const result = await request(
-      "request-join",
-      { roomId, password }
-    );
-
-    if (!result.ok) {
-      throw new Error(result.error);
-    }
-
-    currentRoom = roomId;
-
-    showSection("waitingSection");
-
-    status("Waiting for host or admin approval.");
-  } catch (error) {
-    console.error(error);
-    status(error.message);
-  } finally {
-    button.disabled = false;
-  }
-});
-
-/* ==========================================
-   MEETING EVENTS
-========================================== */
-
-socket.on("join-approved", async (data) => {
-  try {
-    enterMeeting(
-      data.roomId,
-      data.role || "participant"
-    );
-
-    await startMedia();
-
-    status("Your request has been approved.");
-  } catch (error) {
-    console.error(error);
-    status(error.message);
-  }
-});
-
-socket.on("join-rejected", () => {
-  resetMeeting();
-  status("Your meeting request was rejected.");
-});
-
-socket.on("meeting-ended", () => {
-  resetMeeting();
-  status("The host has ended this meeting.");
-});
-
-socket.on("role-updated", (role) => {
-  updateRole(role);
-  renderParticipants(participants);
-  status("Your role is now " + role);
-});
-
-socket.on("user-joined", () => {
-  status("A participant joined the meeting.");
-});
-
-socket.on("user-left", (id) => {
-  removePeer(id);
-  raisedHands.delete(id);
-  updateRaisedHandsUI();
-  status("A participant left the meeting.");
-});
-
-/* ==========================================
-   HOST ACTION BUTTONS
-========================================== */
-
-function actionButton(label, eventName, targetId) {
-  const button = document.createElement("button");
-
-  button.type = "button";
-  button.textContent = label;
-
-  button.addEventListener("click", async () => {
-    button.disabled = true;
-
-    try {
-      const result = await request(
-        eventName,
-        targetId
-      );
-
-      if (!result.ok) {
-        throw new Error(result.error);
-      }
-
-      status(label + " successful.");
-    } catch (error) {
-      status(error.message);
-    } finally {
-      button.disabled = false;
-    }
-  });
-
-  return button;
+  refreshRemoteSharing();
 }
 
 /* ==========================================
-   PARTICIPANTS
-========================================== */
-
-function renderParticipants(list) {
-  participants = Array.isArray(list) ? list : [];
-
-  const container = $("participantList");
-  container.replaceChildren();
-
-  if ($("participantCount")) {
-    $("participantCount").textContent =
-      "(" + participants.length + ")";
-  }
-
-  for (const person of participants) {
-    const row = document.createElement("div");
-    row.className = "participant-item";
-
-    const details = document.createElement("div");
-    details.className = "participant-details";
-
-    const name = document.createElement("span");
-    name.className = "participant-name";
-    name.textContent =
-      person.name +
-      (person.id === socket.id ? " (You)" : "") +
-      (raisedHands.has(person.id) ? " ✋" : "");
-
-    const role = document.createElement("span");
-    role.className = "participant-role";
-    role.textContent = person.role;
-
-    details.append(name, role);
-    row.appendChild(details);
-
-    if (
-      currentRole === "host" &&
-      person.id !== socket.id
-    ) {
-      const actions = document.createElement("div");
-      actions.className = "participant-actions";
-
-      actions.append(
-        actionButton(
-          "Make Admin",
-          "assign-admin",
-          person.id
-        ),
-        actionButton(
-          "Make Host",
-          "transfer-host",
-          person.id
-        )
-      );
-
-      row.appendChild(actions);
-    }
-
-    if (
-      ["host", "admin"].includes(currentRole) &&
-      person.id !== socket.id
-    ) {
-      const actions =
-        row.querySelector(".participant-actions") ||
-        document.createElement("div");
-
-      actions.className = "participant-actions";
-
-      actions.appendChild(
-        actionButton(
-          "Mute",
-          "mute-participant",
-          person.id
-        )
-      );
-
-      if (!actions.parentElement) {
-        row.appendChild(actions);
-      }
-    }
-
-    container.appendChild(row);
-
-    const box = $("video-" + person.id);
-
-    if (box) {
-      box.querySelector(".video-label").textContent =
-        person.name;
-    }
-  }
-
-  updateChatRecipients(participants);
-  updateRaisedHandsUI();
-}
-
-socket.on("participants-updated", (data) => {
-  renderParticipants(data.participants || []);
-});
-
-/* ==========================================
-   PARTICIPANTS COLLAPSE
-========================================== */
-
-$("participantsToggle").addEventListener("click", () => {
-  const body = $("participantsBody");
-  const button = $("participantsToggle");
-
-  body.hidden = !body.hidden;
-
-  button.textContent = body.hidden ? "⌄" : "⌃";
-
-  button.setAttribute(
-    "aria-expanded",
-    String(!body.hidden)
-  );
-
-  button.setAttribute(
-    "aria-label",
-    body.hidden ? "Show participants" : "Hide participants"
-  );
-});
-
-/* ==========================================
-   WAITING ROOM
-========================================== */
-
-socket.on("waiting-updated", (waiting) => {
-  const container = $("waitingList");
-  container.replaceChildren();
-
-  if (!Array.isArray(waiting) || !waiting.length) {
-    const message = document.createElement("p");
-    message.textContent = "No pending requests";
-    container.appendChild(message);
-    return;
-  }
-
-  for (const user of waiting) {
-    const row = document.createElement("div");
-    row.className = "waiting-item";
-
-    const name = document.createElement("span");
-    name.textContent = user.name;
-
-    const actions = document.createElement("div");
-    actions.className = "waiting-actions";
-
-    actions.append(
-      actionButton("Approve", "approve-request", user.id),
-      actionButton("Reject", "reject-request", user.id)
-    );
-
-    row.append(name, actions);
-    container.appendChild(row);
-  }
-});
-
-/* ==========================================
-   HAND RAISE
-   Requires next server.js update
-========================================== */
-
-function updateRaisedHandsUI() {
-  const count = raisedHands.size;
-
-  $("raisedHandCount").textContent = count;
-
-  $("raisedHandsBar").hidden = count === 0;
-
-  const names = participants
-    .filter((person) => raisedHands.has(person.id))
-    .map((person) => person.name);
-
-  $("raisedHandsNames").textContent = names.join(", ");
-
-  document.querySelectorAll(".video-box").forEach((box) => {
-    const id = box.id.replace(/^video-/, "");
-
-    let hand = box.querySelector(".hand-indicator");
-
-    if (raisedHands.has(id)) {
-      if (!hand) {
-        hand = document.createElement("span");
-        hand.className = "hand-indicator";
-        hand.textContent = "✋";
-        box.appendChild(hand);
-      }
-    } else {
-      hand?.remove();
-    }
-  });
-}
-
-$("raiseHandBtn").addEventListener("click", async () => {
-  if (!currentRoom) return;
-
-  const next = !myHandRaised;
-
-  try {
-    const result = await request(
-      "raise-hand",
-      { raised: next }
-    );
-
-    if (!result.ok) {
-      throw new Error(result.error);
-    }
-
-    myHandRaised = next;
-    updateHandControl();
-  } catch (error) {
-    status(error.message);
-  }
-});
-
-socket.on("hands-updated", (data) => {
-  raisedHands = new Set(
-    Array.isArray(data?.ids) ? data.ids : []
-  );
-
-  myHandRaised = raisedHands.has(socket.id);
-
-  updateHandControl();
-  updateRaisedHandsUI();
-  renderParticipants(participants);
-});
-
-/* ==========================================
-   PUBLIC + PRIVATE CHAT
-========================================== */
-
-const chatRecipient = $("chatRecipient");
-const chatMessages = $("chatMessages");
-const chatInput = $("chatInput");
-const chatSendBtn = $("chatSendBtn");
-
-function updateChatRecipients(list) {
-  const previous = chatRecipient.value;
-
-  chatRecipient.replaceChildren();
-
-  const everyone = document.createElement("option");
-  everyone.value = "everyone";
-  everyone.textContent = "Everyone (Public)";
-
-  chatRecipient.appendChild(everyone);
-
-  for (const person of list || []) {
-    if (person.id === socket.id) continue;
-
-    const option = document.createElement("option");
-    option.value = person.id;
-    option.textContent = person.name + " (Private)";
-
-    chatRecipient.appendChild(option);
-  }
-
-  const exists = [...chatRecipient.options].some(
-    (option) => option.value === previous
-  );
-
-  chatRecipient.value = exists
-    ? previous
-    : "everyone";
-}
-
-function displayChatMessage(message) {
-  if (!currentRoom) return;
-
-  chatMessages.querySelector(".chat-empty")?.remove();
-
-  const mine = message.from === socket.id;
-
-  const bubble = document.createElement("div");
-  bubble.className = "chat-message";
-
-  if (mine) bubble.classList.add("mine");
-  if (message.private) bubble.classList.add("private");
-
-  const header = document.createElement("div");
-  header.className = "chat-message-header";
-
-  const name = document.createElement("span");
-  name.className = "chat-message-name";
-
-  name.textContent = mine
-    ? "You"
-    : message.fromName || "Participant";
-
-  const type = document.createElement("span");
-  type.className = "chat-message-type";
-
-  type.textContent = message.private
-    ? mine
-      ? "🔒 Private to " + message.toName
-      : "🔒 Private to you"
-    : "Everyone";
-
-  header.append(name, type);
-  bubble.appendChild(header);
-
-  if (message.text) {
-    const text = document.createElement("div");
-    text.className = "chat-message-text";
-    text.textContent = message.text;
-    bubble.appendChild(text);
-  }
-
-  if (
-    typeof message.image === "string" &&
-    message.image.startsWith("data:image/")
-  ) {
-    const image = document.createElement("img");
-    image.src = message.image;
-    image.alt = "Shared chat image";
-    image.loading = "lazy";
-
-    bubble.appendChild(image);
-  }
-
-  const time = document.createElement("span");
-  time.className = "chat-message-time";
-
-  time.textContent = new Date(
-    message.timestamp || Date.now()
-  ).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-
-  bubble.appendChild(time);
-  chatMessages.appendChild(bubble);
-
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-socket.on("chat-message", displayChatMessage);
-
-/* ==========================================
-   CHAT IMAGE SELECT + PREVIEW
-========================================== */
-
-$("attachImageBtn").addEventListener("click", () => {
-  $("chatImageInput").click();
-});
-
-function clearSelectedImage() {
-  selectedImage = null;
-  $("chatImageInput").value = "";
-
-  if (imagePreviewUrl) {
-    URL.revokeObjectURL(imagePreviewUrl);
-    imagePreviewUrl = null;
-  }
-
-  $("chatImageThumbnail").removeAttribute("src");
-  $("chatImagePreview").hidden = true;
-}
-
-$("removeChatImageBtn").addEventListener(
-  "click",
-  clearSelectedImage
-);
-
-$("chatImageInput").addEventListener("change", () => {
-  const file = $("chatImageInput").files[0];
-
-  if (!file) return;
-
-  const allowed = [
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "image/gif"
-  ];
-
-  if (!allowed.includes(file.type)) {
-    status("Only JPG, PNG, WEBP and GIF images are allowed.");
-    clearSelectedImage();
-    return;
-  }
-
-  if (file.size > 2 * 1024 * 1024) {
-    status("Image must be smaller than 2 MB.");
-    clearSelectedImage();
-    return;
-  }
-
-  clearSelectedImage();
-
-  selectedImage = file;
-  imagePreviewUrl = URL.createObjectURL(file);
-
-  $("chatImageThumbnail").src = imagePreviewUrl;
-  $("chatImageFilename").textContent = file.name;
-  $("chatImagePreview").hidden = false;
-});
-
-function imageToDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(
-      new Error("Could not read image.")
-    );
-
-    reader.readAsDataURL(file);
-  });
-}
-
-/* ==========================================
-   SEND CHAT
-========================================== */
-
-$("chatForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-
-  if (!socket.connected || !currentRoom) {
-    status("Join a meeting before sending messages.");
-    return;
-  }
-
-  const text = chatInput.value.trim();
-
-  if (!text && !selectedImage) return;
-
-  chatSendBtn.disabled = true;
-
-  try {
-    const data = {
-      text,
-      to: chatRecipient.value
-    };
-
-    if (selectedImage) {
-      data.image = await imageToDataURL(selectedImage);
-    }
-
-    const result = await request(
-      "chat-message",
-      data,
-      selectedImage ? 20000 : 10000
-    );
-
-    if (!result.ok) {
-      throw new Error(result.error);
-    }
-
-    chatInput.value = "";
-    clearSelectedImage();
-    chatInput.focus();
-  } catch (error) {
-    console.error("Chat error:", error);
-    status("Message failed: " + error.message);
-  } finally {
-    chatSendBtn.disabled = false;
-  }
-});
-
-function clearMeetingChat() {
-  chatMessages.replaceChildren();
-
-  const empty = document.createElement("div");
-  empty.className = "chat-empty";
-  empty.textContent = "No messages yet. Start a conversation!";
-
-  chatMessages.appendChild(empty);
-
-  updateChatRecipients([]);
-  chatInput.value = "";
-  chatSendBtn.disabled = false;
-  clearSelectedImage();
-}
-
-/* ==========================================
-   CHAT SHOW / HIDE
-========================================== */
-
-$("toggleChatBtn").addEventListener("click", () => {
-  chatVisible = !chatVisible;
-
-  $("chatPanel").hidden = !chatVisible;
-
-  $("toggleChatBtn").setAttribute(
-    "aria-expanded",
-    String(chatVisible)
-  );
-
-  $("toggleChatBtn").classList.toggle(
-    "is-active",
-    chatVisible
-  );
-});
-
-/* ==========================================
-   INVITE LINK
-========================================== */
-
-$("copyBtn").addEventListener("click", async () => {
-  if (!currentRoom) return;
-
-  try {
-    await navigator.clipboard.writeText(
-      meetingLink(currentRoom)
-    );
-
-    $("copyBtn").textContent = "✓ Copied!";
-
-    status(
-      "Invite link copied. Share the password separately."
-    );
-
-    setTimeout(() => {
-      $("copyBtn").textContent = "⧉ Copy Invite Link";
-    }, 2500);
-  } catch {
-    status("Unable to copy invite link.");
-  }
-});
-
-/* ==========================================
-   MIC CONTROL
-========================================== */
-
-$("micBtn").addEventListener("click", () => {
-  const track = localStream?.getAudioTracks()[0];
-
-  if (!track) return;
-
-  track.enabled = !track.enabled;
-
-  updateMicControl();
-});
-
-/* ==========================================
-   CAMERA CONTROL
-========================================== */
-
-$("cameraBtn").addEventListener("click", () => {
-  const track = localStream?.getVideoTracks()[0];
-
-  if (!track) return;
-
-  track.enabled = !track.enabled;
-
-  updateCameraControl();
-});
-
-/* ==========================================
-   HOST / ADMIN MUTE
-   Server will enforce permissions next
-========================================== */
-
-socket.on("force-mute", () => {
-  const track = localStream?.getAudioTracks()[0];
-
-  if (track) {
-    track.enabled = false;
-    updateMicControl();
-    status("A host or admin muted your microphone.");
-  }
-});
-
-/* ==========================================
-   SCREEN SHARE
+   SCREEN SHARE WITH CAMERA SEPARATE
 ========================================== */
 
 async function startScreenShare() {
-  if (!currentRoom || screenStream) return;
+  if (
+    !currentRoom ||
+    screenStream
+  ) return;
 
-  const stream =
+  if (
+    !navigator.mediaDevices
+      ?.getDisplayMedia
+  ) {
+    throw new Error(
+      "This browser cannot share its screen. Use desktop Chrome or Edge."
+    );
+  }
+
+  // Browser must receive this call from
+  // a real user's click gesture.
+
+  const captured =
     await navigator.mediaDevices.getDisplayMedia({
       video: true,
       audio: false
     });
 
-  const track = stream.getVideoTracks()[0];
+  const track =
+    captured.getVideoTracks()[0];
 
   if (!track) {
-    stream.getTracks().forEach((item) => item.stop());
-    throw new Error("No screen track was captured.");
+    captured.getTracks().forEach(
+      item => item.stop()
+    );
+
+    throw new Error(
+      "Screen capture did not supply a video track"
+    );
   }
 
-  screenStream = stream;
-
   try {
-    for (const peer of peers.values()) {
-      const sender = peer.getSenders().find(
-        (item) => item.track?.kind === "video"
-      );
+    const permission = await request(
+      "screen-share-state",
+      { sharing: true }
+    );
 
-      if (sender) {
-        await sender.replaceTrack(track);
-      }
+    if (!permission.ok) {
+      throw new Error(
+        permission.error
+      );
     }
+
+    // Dedicated screen sender exists
+    // even when camera track is OFF.
+
+    await Promise.all(
+      [...peers.values()].map(
+        record =>
+          record.screen.sender.replaceTrack(
+            track
+          )
+      )
+    );
+
+    screenStream = captured;
+    shareGrantUntil = 0;
 
     activeScreenSharer = "local";
     selectedMainVideo = "local";
 
-    createVideo(
-      "local",
-      currentUser.name + " (Screen)",
-      localStream,
-      true
-    );
-
-    showScreenBanner(currentUser.name);
-
-    socket.emit("screen-share-state", {
-      sharing: true
-    });
+    refreshRemoteSharing();
 
     track.onended = () => {
-      stopScreenShare().catch(console.error);
+      stopScreenShare().catch(
+        console.error
+      );
     };
 
-    updateScreenControl();
+    updateControls();
 
-    status("Screen sharing started.");
+    notify(
+      "Screen sharing started",
+      "success"
+    );
   } catch (error) {
-    screenStream = null;
-    stream.getTracks().forEach((item) => item.stop());
+    captured.getTracks().forEach(
+      item => item.stop()
+    );
+
+    await Promise.allSettled(
+      [...peers.values()].map(
+        record =>
+          record.screen.sender.replaceTrack(
+            null
+          )
+      )
+    );
+
+    if (socket.connected) {
+      socket.emit(
+        "screen-share-state",
+        { sharing: false }
+      );
+    }
+
     throw error;
   }
 }
@@ -1787,306 +1818,2921 @@ async function startScreenShare() {
 async function stopScreenShare() {
   if (!screenStream) return;
 
-  const previous = screenStream;
+  const captured = screenStream;
   screenStream = null;
 
-  const cameraTrack =
-    localStream?.getVideoTracks()[0] || null;
+  const track =
+    captured.getVideoTracks()[0];
 
-  for (const peer of peers.values()) {
-    const sender = peer.getSenders().find(
-      (item) => item.track?.kind === "video"
-    );
-
-    if (sender) {
-      await sender.replaceTrack(cameraTrack);
-    }
+  if (track) {
+    track.onended = null;
   }
 
-  previous.getTracks().forEach((track) => track.stop());
-
-  activeScreenSharer = null;
-  selectedMainVideo = "local";
-
-  createVideo(
-    "local",
-    currentUser.name + " (You)",
-    localStream,
-    true
+  await Promise.allSettled(
+    [...peers.values()].map(
+      record =>
+        record.screen.sender.replaceTrack(
+          null
+        )
+    )
   );
 
-  showScreenBanner(null);
+  captured.getTracks().forEach(
+    item => item.stop()
+  );
 
-  socket.emit("screen-share-state", {
-    sharing: false
-  });
+  if (socket.connected) {
+    socket.emit(
+      "screen-share-state",
+      { sharing: false }
+    );
+  }
 
-  updateScreenControl();
-  status("Screen sharing stopped.");
+  activeScreenSharer = null;
+
+  refreshRemoteSharing();
+  updateControls();
+
+  notify(
+    "Screen sharing stopped"
+  );
 }
 
-$("screenBtn").addEventListener("click", async () => {
+async function toggleScreen() {
   if (!currentRoom) return;
 
-  $("screenBtn").disabled = true;
+  const button = $("screenBtn");
+  button.disabled = true;
 
   try {
     if (screenStream) {
-      await stopScreenShare();
-      return;
+      return await stopScreenShare();
     }
 
-    if (["host", "admin"].includes(currentRole)) {
+    if (
+      !navigator.mediaDevices
+        ?.getDisplayMedia
+    ) {
+      throw new Error(
+        "Screen sharing is not supported in this browser; viewing shares still works."
+      );
+    }
+
+    const canShare =
+      currentRole === "host" ||
+      currentSettings.share ||
+      shareGrantUntil > Date.now();
+
+    if (canShare) {
       await startScreenShare();
-      return;
+    } else {
+      const result = await request(
+        "request-screen-share",
+        {}
+      );
+
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+
+      notify(
+        "Host has received your screen sharing request",
+        "success"
+      );
+    }
+  } catch (error) {
+    notify(error.message, "error");
+  } finally {
+    button.disabled = false;
+    updateControls();
+  }
+}
+
+/* ==========================================
+   BUTTON ICONS AND STATES
+========================================== */
+
+function control(
+  id,
+  icon,
+  label,
+  off = false
+) {
+  const button = $(id);
+
+  if (!button) return;
+
+  const iconBox =
+    button.querySelector(
+      ".ms-control-icon"
+    );
+
+  const caption =
+    button.querySelector(
+      ".ms-control-label"
+    );
+
+  if (iconBox) {
+    iconBox.innerHTML =
+      icons[icon] || "";
+  }
+
+  if (caption) {
+    caption.textContent = label;
+  }
+
+  button.classList.toggle(
+    "is-off",
+    off
+  );
+
+  button.setAttribute(
+    "aria-label",
+    label
+  );
+}
+
+function updateControls() {
+  const mic =
+    localStream?.getAudioTracks()[0];
+
+  const cam =
+    localStream?.getVideoTracks()[0];
+
+  const micAllowed =
+    currentRole === "host" ||
+    currentSettings.mic;
+
+  const camAllowed =
+    currentRole === "host" ||
+    currentSettings.camera;
+
+  control(
+    "micBtn",
+    mic?.enabled ? "mic" : "micOff",
+    !mic
+      ? "No mic"
+      : mic.enabled
+        ? "Mute"
+        : "Unmute",
+    !mic?.enabled
+  );
+
+  control(
+    "cameraBtn",
+    cam?.enabled ? "video" : "videoOff",
+    !cam
+      ? "No camera"
+      : cam.enabled
+        ? "Stop video"
+        : "Start video",
+    !cam?.enabled
+  );
+
+  control(
+    "screenBtn",
+    "screen",
+    screenStream
+      ? "Stop share"
+      : currentRole === "participant" &&
+        !currentSettings.share &&
+        shareGrantUntil < Date.now()
+        ? "Request share"
+        : "Share screen"
+  );
+
+  control(
+    "raiseHandBtn",
+    "hand",
+    myHandRaised
+      ? "Lower hand"
+      : "Raise hand"
+  );
+
+  control(
+    "toggleChatBtn",
+    "chat",
+    "Chat"
+  );
+
+  control(
+    "leaveBtn",
+    "leave",
+    "Leave"
+  );
+
+  $("micBtn").disabled =
+    !mic || !micAllowed;
+
+  $("cameraBtn").disabled =
+    !cam || !camAllowed;
+
+  $("raiseHandBtn").disabled =
+    currentRole !== "host" &&
+    !currentSettings.hand;
+
+  $("screenBtn").classList.toggle(
+    "is-active",
+    Boolean(screenStream)
+  );
+
+  $("raiseHandBtn").classList.toggle(
+    "is-active",
+    myHandRaised
+  );
+
+  $("raiseHandBtn").setAttribute(
+    "aria-pressed",
+    String(myHandRaised)
+  );
+
+  const chatAllowed =
+    currentRole === "host" ||
+    currentSettings.chat;
+
+  for (const id of [
+    "chatInput",
+    "chatSendBtn",
+    "attachImageBtn"
+  ]) {
+    if ($(id)) {
+      $(id).disabled = !chatAllowed;
+    }
+  }
+}
+
+/* ==========================================
+   HOST-ONLY BUTTON VISIBILITY
+========================================== */
+
+function syncHostActions() {
+  const host =
+    currentRole === "host" &&
+    Boolean(currentRoom);
+
+  for (const id of [
+    "roomSettingsBtn",
+    "extendMeetingBtn",
+    "roomRequestsBtn",
+    "toggleRequestsBtn",
+    "showRequestsTab",
+    "moreRequestsBtn",
+    "moreSettingsBtn",
+    "moreAdjustTimeBtn"
+  ]) {
+    if ($(id)) {
+      $(id).hidden = !host;
+    }
+  }
+
+  if ($("hostPanel")) {
+    $("hostPanel").hidden = !host;
+  }
+
+  if (
+    !host &&
+    sidebarTab === "requests"
+  ) {
+    closeSidebar();
+  }
+
+  updateRequestIndicator();
+}
+
+/* ==========================================
+   ZOOM-STYLE OPEN / CLOSE SIDE PANEL
+========================================== */
+
+function openSidebar(tab) {
+  if (!currentRoom) return;
+
+  closeMoreMenu();
+
+  if (
+    sidebarTab === tab &&
+    !$("meetingSidebar").hidden
+  ) {
+    return closeSidebar();
+  }
+
+  if (
+    tab === "requests" &&
+    currentRole !== "host"
+  ) {
+    return;
+  }
+
+  sidebarTab = tab;
+
+  $("meetingSidebar").hidden = false;
+
+  $("meetingLayout").classList.add(
+    "sidebar-open"
+  );
+
+  for (const [name, panel] of [
+    ["people", "participantsPanel"],
+    ["chat", "chatPanel"],
+    ["requests", "requestsPanel"]
+  ]) {
+    $(panel).hidden =
+      name !== tab;
+  }
+
+  for (const [name, buttonId] of [
+    ["people", "showParticipantsTab"],
+    ["chat", "showChatTab"],
+    ["requests", "showRequestsTab"]
+  ]) {
+    $(buttonId)?.classList.toggle(
+      "is-active",
+      name === tab
+    );
+  }
+
+  for (const [name, buttonId] of [
+    ["people", "toggleParticipantsBtn"],
+    ["chat", "toggleChatBtn"],
+    ["requests", "toggleRequestsBtn"]
+  ]) {
+    $(buttonId)?.classList.toggle(
+      "is-active",
+      name === tab
+    );
+
+    $(buttonId)?.setAttribute(
+      "aria-expanded",
+      String(name === tab)
+    );
+  }
+
+  const titles = {
+    people: [
+      "Participants",
+      "People in this meeting"
+    ],
+    chat: [
+      "Meeting chat",
+      "Public and private messages"
+    ],
+    requests: [
+      "Meeting requests",
+      "Join and screen-share approvals"
+    ]
+  };
+
+  $("sidebarPanelTitle").textContent =
+    titles[tab][0];
+
+  $("sidebarPanelSubtitle").textContent =
+    titles[tab][1];
+
+  if (tab === "requests") {
+    pausedRequestKey = null;
+    $("requestPopup").hidden = true;
+  }
+
+  updateRequestIndicator();
+}
+
+function closeSidebar() {
+  sidebarTab = null;
+
+  $("meetingSidebar").hidden = true;
+
+  $("meetingLayout").classList.remove(
+    "sidebar-open"
+  );
+
+  for (const id of [
+    "toggleParticipantsBtn",
+    "toggleChatBtn",
+    "toggleRequestsBtn"
+  ]) {
+    $(id)?.setAttribute(
+      "aria-expanded",
+      "false"
+    );
+  }
+
+  for (const id of [
+    "toggleParticipantsBtn",
+    "toggleChatBtn",
+    "toggleRequestsBtn"
+  ]) {
+    $(id)?.classList.remove(
+      "is-active"
+    );
+  }
+}
+
+function closeMoreMenu() {
+  $("meetingMoreMenu").hidden = true;
+
+  $("moreBtn").setAttribute(
+    "aria-expanded",
+    "false"
+  );
+}
+
+function toggleMoreMenu() {
+  const open =
+    $("meetingMoreMenu").hidden;
+
+  if (open) {
+    closeSidebar();
+  }
+
+  $("meetingMoreMenu").hidden = !open;
+
+  $("moreBtn").setAttribute(
+    "aria-expanded",
+    String(open)
+  );
+}
+
+/* ==========================================
+   PARTICIPANT LIST
+========================================== */
+
+function renderParticipants(list) {
+  participants =
+    Array.isArray(list) ? list : [];
+
+  $("participantCount").textContent =
+    `(${participants.length}/${MAX_PEOPLE})`;
+
+  const panel = $("participantList");
+  panel.replaceChildren();
+
+  for (const person of participants) {
+    const row =
+      document.createElement("div");
+
+    row.className = "participant-item";
+
+    const avatar =
+      document.createElement("span");
+
+    avatar.textContent =
+      (person.name || "?")
+        .slice(0, 1)
+        .toUpperCase();
+
+    avatar.style.cssText =
+      "display:grid;place-items:center;" +
+      "flex:0 0 31px;height:31px;" +
+      "border-radius:9px;background:#3b4465;" +
+      "color:#fff;font-weight:850";
+
+    const details =
+      document.createElement("div");
+
+    details.className =
+      "participant-details";
+
+    const title =
+      document.createElement("span");
+
+    title.className =
+      "participant-name";
+
+    title.textContent =
+      (person.name || "Guest") +
+      (
+        person.id === socket.id
+          ? " (You)"
+          : ""
+      ) +
+      (
+        raisedHands.has(person.id)
+          ? " ✋"
+          : ""
+      );
+
+    const role =
+      document.createElement("span");
+
+    role.className =
+      "participant-role";
+
+    role.textContent =
+      person.role === "host"
+        ? "Host"
+        : "Participant";
+
+    details.append(title, role);
+    row.append(avatar, details);
+
+    if (
+      currentRole === "host" &&
+      person.id !== socket.id
+    ) {
+      const actions =
+        document.createElement("div");
+
+      actions.className =
+        "participant-actions";
+
+      const action = (text, event) => {
+        const button =
+          document.createElement("button");
+
+        button.type = "button";
+        button.textContent = text;
+
+        button.addEventListener(
+          "click",
+          async () => {
+            button.disabled = true;
+
+            try {
+              const reply = await request(
+                event,
+                person.id
+              );
+
+              if (!reply.ok) {
+                throw new Error(
+                  reply.error
+                );
+              }
+
+              notify(
+                text + " sent",
+                "success"
+              );
+            } catch (error) {
+              notify(
+                error.message,
+                "error"
+              );
+            } finally {
+              button.disabled = false;
+            }
+          }
+        );
+
+        return button;
+      };
+
+      actions.append(
+        action(
+          person.micEnabled === false
+            ? "Ask unmute"
+            : "Mute",
+          person.micEnabled === false
+            ? "ask-participant-unmute"
+            : "mute-participant"
+        ),
+
+        action(
+          person.videoEnabled === false
+            ? "Ask video"
+            : "Stop video",
+          person.videoEnabled === false
+            ? "ask-participant-video"
+            : "stop-participant-video"
+        )
+      );
+
+      row.appendChild(actions);
+    }
+
+    panel.appendChild(row);
+
+    const box = boxFor(person.id);
+
+    if (box) {
+      box.querySelector(
+        ".video-label"
+      ).textContent = person.name;
+    }
+  }
+
+  updateChatRecipients();
+  updateRaisedHandsUI();
+  renderVideoLayout();
+}
+
+/* ==========================================
+   HAND RAISE INDICATORS
+========================================== */
+
+function updateRaisedHandsUI() {
+  $("raisedHandCount").textContent =
+    raisedHands.size;
+
+  $("raisedHandsBar").hidden =
+    raisedHands.size === 0;
+
+  $("raisedHandsNames").textContent =
+    participants
+      .filter(
+        person =>
+          raisedHands.has(person.id)
+      )
+      .map(
+        person => person.name
+      )
+      .join(", ");
+
+  document.querySelectorAll(
+    "#videoGrid .video-box"
+  ).forEach(box => {
+    let icon =
+      box.querySelector(
+        ".hand-indicator"
+      );
+
+    const id =
+      box.dataset.personId === "local"
+        ? socket.id
+        : box.dataset.personId;
+
+    if (raisedHands.has(id)) {
+      if (!icon) {
+        icon =
+          document.createElement("span");
+
+        icon.className =
+          "hand-indicator";
+
+        icon.textContent = "✋";
+
+        box.appendChild(icon);
+      }
+    } else {
+      icon?.remove();
+    }
+  });
+}
+
+/* ==========================================
+   CHAT RECIPIENTS
+========================================== */
+
+function updateChatRecipients() {
+  const input = $("chatRecipient");
+  const current = input.value;
+
+  input.replaceChildren();
+
+  const all =
+    document.createElement("option");
+
+  all.value = "everyone";
+  all.textContent = "Everyone (Public)";
+
+  input.appendChild(all);
+
+  participants
+    .filter(
+      person =>
+        person.id !== socket.id
+    )
+    .forEach(person => {
+      const option =
+        document.createElement("option");
+
+      option.value = person.id;
+
+      option.textContent =
+        person.name + " (Private)";
+
+      input.appendChild(option);
+    });
+
+  const exists = [...input.options].some(
+    option =>
+      option.value === current
+  );
+
+  input.value =
+    exists ? current : "everyone";
+}
+
+/* ==========================================
+   DISPLAY CHAT MESSAGE
+========================================== */
+
+function displayChatMessage(message) {
+  if (!currentRoom) return;
+
+  $("chatMessages").querySelector(
+    ".chat-empty"
+  )?.remove();
+
+  const mine =
+    message.from === socket.id;
+
+  const bubble =
+    document.createElement("div");
+
+  bubble.className =
+    "chat-message" +
+    (mine ? " mine" : "") +
+    (message.private ? " private" : "");
+
+  const header =
+    document.createElement("div");
+
+  header.className =
+    "chat-message-header";
+
+  const sender =
+    document.createElement("span");
+
+  sender.className =
+    "chat-message-name";
+
+  sender.textContent = mine
+    ? "You"
+    : message.fromName ||
+      "Participant";
+
+  const recipient =
+    document.createElement("span");
+
+  recipient.className =
+    "chat-message-type";
+
+  recipient.textContent =
+    message.private
+      ? mine
+        ? "🔒 Private to " +
+          message.toName
+        : "🔒 Private to you"
+      : "Everyone";
+
+  header.append(sender, recipient);
+  bubble.appendChild(header);
+
+  if (message.text) {
+    const text =
+      document.createElement("div");
+
+    text.className =
+      "chat-message-text";
+
+    text.textContent =
+      message.text;
+
+    bubble.appendChild(text);
+  }
+
+  if (
+    typeof message.image === "string" &&
+    /^data:image\//.test(message.image)
+  ) {
+    const image =
+      document.createElement("img");
+
+    image.alt = "Chat attachment";
+    image.src = message.image;
+    image.loading = "lazy";
+
+    bubble.appendChild(image);
+  }
+
+  const time =
+    document.createElement("span");
+
+  time.className =
+    "chat-message-time";
+
+  time.textContent = new Date(
+    message.timestamp || Date.now()
+  ).toLocaleTimeString(
+    [],
+    {
+      hour: "2-digit",
+      minute: "2-digit"
+    }
+  );
+
+  bubble.appendChild(time);
+
+  $("chatMessages").appendChild(
+    bubble
+  );
+
+  $("chatMessages").scrollTop =
+    $("chatMessages").scrollHeight;
+
+  if (sidebarTab !== "chat") {
+    $("toggleChatBtn")?.classList.add(
+      "has-unread"
+    );
+  }
+}
+
+/* ==========================================
+   CHAT IMAGE HANDLING
+========================================== */
+
+function clearSelectedImage() {
+  selectedImage = null;
+
+  $("chatImageInput").value = "";
+
+  if (imagePreviewUrl) {
+    URL.revokeObjectURL(
+      imagePreviewUrl
+    );
+  }
+
+  imagePreviewUrl = null;
+
+  $("chatImageThumbnail")
+    .removeAttribute("src");
+
+  $("chatImagePreview").hidden = true;
+}
+
+async function sendChat(event) {
+  event.preventDefault();
+
+  const text =
+    $("chatInput").value.trim();
+
+  if (
+    !text &&
+    !selectedImage
+  ) return;
+
+  const button = $("chatSendBtn");
+  button.disabled = true;
+
+  try {
+    const payload = {
+      text,
+      to: $("chatRecipient").value
+    };
+
+    if (selectedImage) {
+      payload.image =
+        await new Promise(
+          (resolve, reject) => {
+            const reader =
+              new FileReader();
+
+            reader.onload = () =>
+              resolve(reader.result);
+
+            reader.onerror = () =>
+              reject(
+                new Error(
+                  "Could not read attached image"
+                )
+              );
+
+            reader.readAsDataURL(
+              selectedImage
+            );
+          }
+        );
     }
 
     const result = await request(
-      "request-screen-share",
-      {}
+      "chat-message",
+      payload,
+      selectedImage ? 30000 : 15000
     );
 
     if (!result.ok) {
       throw new Error(result.error);
     }
 
-    status("Screen share request sent to host/admin.");
+    $("chatInput").value = "";
+
+    clearSelectedImage();
   } catch (error) {
-    console.error(error);
-    status("Screen sharing: " + error.message);
+    notify(error.message, "error");
   } finally {
-    $("screenBtn").disabled = false;
+    updateControls();
   }
-});
+}
+
+function clearChat() {
+  $("chatMessages").replaceChildren();
+
+  const empty =
+    document.createElement("div");
+
+  empty.className = "chat-empty";
+
+  empty.textContent =
+    "No messages yet. Start a conversation!";
+
+  $("chatMessages").appendChild(
+    empty
+  );
+
+  $("chatInput").value = "";
+
+  clearSelectedImage();
+  updateChatRecipients();
+}
 
 /* ==========================================
-   SHARE APPROVAL EVENTS
-   Backend support required
+   REQUEST BADGES
 ========================================== */
 
-socket.on("screen-share-request", (data) => {
-  if (!["host", "admin"].includes(currentRole)) return;
+function updateRequestIndicator() {
+  const count = [
+    ...pendingRequests.values()
+  ].filter(
+    item => !item.consentKind
+  ).length;
 
-  const container = $("screenShareRequests");
-  if (!container || !data?.id) return;
+  for (const id of [
+    "roomRequestCount",
+    "roomRequestCountTop",
+    "roomRequestCountToolbar"
+  ]) {
+    if ($(id)) {
+      $(id).textContent =
+        String(count);
+    }
+  }
 
-  if (document.getElementById("share-" + data.id)) {
+  for (const id of [
+    "roomRequestCountTop",
+    "roomRequestCountToolbar"
+  ]) {
+    if ($(id)) {
+      $(id).hidden =
+        count === 0;
+    }
+  }
+
+  $("requestEmptyMessage").hidden =
+    count > 0;
+}
+
+function showNextRequest() {
+  const item = [
+    ...pendingRequests.values()
+  ].find(
+    item =>
+      item.key !== pausedRequestKey
+  );
+
+  activeRequest = item || null;
+
+  const popup = $("requestPopup");
+
+  if (!item) {
+    popup.hidden = true;
+    updateRequestIndicator();
     return;
   }
 
-  const row = document.createElement("div");
-  row.id = "share-" + data.id;
-  row.className = "waiting-item";
+  $("requestPopupTitle").textContent =
+    item.title;
 
-  const name = document.createElement("span");
-  name.textContent =
-    (data.name || "Participant") + " wants to share screen";
+  $("requestPopupDescription").textContent =
+    item.description;
 
-  const actions = document.createElement("div");
-  actions.className = "waiting-actions";
+  $("requestApproveBtn").textContent =
+    item.consentKind
+      ? "Allow"
+      : "Approve";
 
-  const approve = actionButton(
-    "Approve",
-    "approve-screen-share",
-    data.id
-  );
+  $("requestRejectBtn").textContent =
+    item.consentKind
+      ? "Decline"
+      : "Reject";
 
-  const reject = actionButton(
-    "Reject",
-    "reject-screen-share",
-    data.id
-  );
+  $("requestPopupCounter").textContent =
+    pendingRequests.size +
+    " pending";
 
-  actions.append(approve, reject);
-  row.append(name, actions);
-  container.appendChild(row);
-});
+  popup.hidden = false;
 
-socket.on("screen-share-approved", async () => {
-  try {
-    await startScreenShare();
-  } catch (error) {
-    status("Could not share screen: " + error.message);
-  }
-});
+  updateRequestIndicator();
+}
 
-socket.on("screen-share-rejected", () => {
-  status("Your screen share request was rejected.");
-});
+/* END OF PART 2
+   CONTINUE WITH PART 3 BELOW THIS LINE */
 
-socket.on("screen-share-updated", (data) => {
-  if (!data) return;
-
-  if (data.sharing) {
-    activeScreenSharer = data.id || null;
-
-    const person = participants.find(
-      (item) => item.id === data.id
-    );
-
-    showScreenBanner(person?.name || "Participant");
-  } else {
-    activeScreenSharer = null;
-    showScreenBanner(null);
-  }
-
-  renderVideoLayout();
-});
+/* ================================================
+   MEETSPACE FINAL — SCRIPT.JS
+   PART 3 / 3
+   REQUESTS + TIME + SOCKET EVENTS + STARTUP
+================================================ */
 
 /* ==========================================
-   RESET MEETING
+   JOIN / SCREEN SHARE REQUEST QUEUE
+========================================== */
+
+function syncRequestQueue(kind, list) {
+  for (const key of [...pendingRequests.keys()]) {
+    if (key.startsWith(kind + ":")) {
+      pendingRequests.delete(key);
+    }
+  }
+
+  if (
+    Array.isArray(list) &&
+    currentRole === "host"
+  ) {
+    for (const user of list) {
+      if (!user?.id) continue;
+
+      const key =
+        kind + ":" + user.id;
+
+      pendingRequests.set(key, {
+        key,
+        userId: user.id,
+
+        title:
+          user.name +
+          (
+            kind === "join"
+              ? " wants to join"
+              : " wants to share"
+          ),
+
+        description:
+          kind === "join"
+            ? "Allow this person to enter the meeting?"
+            : "Allow screen sharing?",
+
+        approveEvent:
+          kind === "join"
+            ? "approve-request"
+            : "approve-screen-share",
+
+        rejectEvent:
+          kind === "join"
+            ? "reject-request"
+            : "reject-screen-share"
+      });
+    }
+  }
+
+  if (
+    pausedRequestKey &&
+    !pendingRequests.has(
+      pausedRequestKey
+    )
+  ) {
+    pausedRequestKey = null;
+  }
+
+  showNextRequest();
+}
+
+/* ==========================================
+   HOST ASKS FOR MICROPHONE / CAMERA CONSENT
+========================================== */
+
+function askConsent(kind) {
+  const key = "consent:" + kind;
+
+  pendingRequests.set(key, {
+    key,
+    consentKind: kind,
+
+    title:
+      kind === "mic"
+        ? "Host requests microphone"
+        : "Host requests camera",
+
+    description:
+      kind === "mic"
+        ? "Would you like to unmute?"
+        : "Would you like to turn on your camera?"
+  });
+
+  showNextRequest();
+}
+
+async function replyToRequest(approve) {
+  const item = activeRequest;
+
+  if (!item) return;
+
+  $("requestApproveBtn").disabled = true;
+  $("requestRejectBtn").disabled = true;
+
+  try {
+    if (
+      item.consentKind &&
+      approve
+    ) {
+      const allowed =
+        item.consentKind === "mic"
+          ? currentSettings.mic
+          : currentSettings.camera;
+
+      const track =
+        item.consentKind === "mic"
+          ? localStream?.getAudioTracks()[0]
+          : localStream?.getVideoTracks()[0];
+
+      if (!allowed || !track) {
+        throw new Error(
+          "Permission or device track unavailable"
+        );
+      }
+
+      track.enabled = true;
+
+      emitMediaState();
+      updateControls();
+      updateVideoPlaceholders();
+    } else if (!item.consentKind) {
+      const result = await request(
+        approve
+          ? item.approveEvent
+          : item.rejectEvent,
+        item.userId
+      );
+
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+    }
+
+    pendingRequests.delete(item.key);
+    pausedRequestKey = null;
+
+    notify(
+      approve
+        ? "Request approved"
+        : "Request declined",
+      "success"
+    );
+  } catch (error) {
+    notify(error.message, "error");
+  } finally {
+    $("requestApproveBtn").disabled = false;
+    $("requestRejectBtn").disabled = false;
+
+    showNextRequest();
+  }
+}
+
+/* ==========================================
+   WAITING ROOM AND SCREEN SHARE REQUEST LIST
+========================================== */
+
+function renderWaitingRequests() {
+  const host = $("waitingList");
+
+  host.replaceChildren();
+
+  if (!waitingRoomUsers.length) {
+    const message =
+      document.createElement("p");
+
+    message.textContent =
+      "No pending requests";
+
+    host.appendChild(message);
+  }
+
+  for (const person of waitingRoomUsers) {
+    host.appendChild(
+      makeRequestRow(
+        person,
+        "approve-request",
+        "reject-request"
+      )
+    );
+  }
+
+  const sharing =
+    $("screenShareRequests");
+
+  sharing.replaceChildren();
+
+  for (const person of screenRequests) {
+    sharing.appendChild(
+      makeRequestRow(
+        person,
+        "approve-screen-share",
+        "reject-screen-share"
+      )
+    );
+  }
+
+  updateRequestIndicator();
+}
+
+function makeRequestRow(
+  person,
+  acceptEvent,
+  declineEvent
+) {
+  const row =
+    document.createElement("div");
+
+  row.className = "waiting-item";
+
+  const name =
+    document.createElement("span");
+
+  name.textContent = person.name;
+
+  const buttons =
+    document.createElement("div");
+
+  buttons.className =
+    "waiting-actions";
+
+  for (const [label, eventName] of [
+    ["Approve", acceptEvent],
+    ["Reject", declineEvent]
+  ]) {
+    const button =
+      document.createElement("button");
+
+    button.type = "button";
+    button.textContent = label;
+
+    button.addEventListener(
+      "click",
+      async () => {
+        button.disabled = true;
+
+        try {
+          const result = await request(
+            eventName,
+            person.id
+          );
+
+          if (!result.ok) {
+            throw new Error(result.error);
+          }
+
+          notify(
+            label + " sent",
+            "success"
+          );
+        } catch (error) {
+          notify(
+            error.message,
+            "error"
+          );
+        } finally {
+          button.disabled = false;
+        }
+      }
+    );
+
+    buttons.appendChild(button);
+  }
+
+  row.append(name, buttons);
+
+  return row;
+}
+
+/* ==========================================
+   SETTINGS MODAL HELPERS
+========================================== */
+
+function toggleModal(id, show) {
+  const dialog = $(id);
+
+  if (!dialog) return;
+
+  dialog.hidden = !show;
+
+  document.body.classList.toggle(
+    "ms-dialog-open",
+    show
+  );
+
+  if (show) {
+    dialog.querySelector(
+      ".ms-room-dialog"
+    )?.focus();
+  }
+}
+
+function closeAllModals() {
+  for (const id of [
+    "createSettingsModal",
+    "roomSettingsModal",
+    "extendMeetingModal"
+  ]) {
+    toggleModal(id, false);
+  }
+}
+
+function updateCreateSummary() {
+  const duration =
+    $("meetingDuration");
+
+  const isCustom =
+    duration.selectedOptions[0]
+      ?.dataset.custom === "true";
+
+  $("customDurationFields").hidden =
+    !isCustom;
+
+  $("scheduledMeetingFields").hidden =
+    $("meetingType").value !==
+    "scheduled";
+
+  const minutes = isCustom
+    ? $("meetingCustomDuration").value
+    : duration.value;
+
+  $("createSettingsSummary").textContent =
+    `${minutes || "Custom"} minutes · Waiting room ` +
+    (
+      $("setting-approval").checked
+        ? "on"
+        : "off"
+    );
+}
+
+function createSettingsTab(general) {
+  $("createGeneralFields").hidden =
+    !general;
+
+  $("createPermissionFields").hidden =
+    general;
+
+  $("createGeneralTab").classList.toggle(
+    "is-active",
+    general
+  );
+
+  $("createPermissionsTab").classList.toggle(
+    "is-active",
+    !general
+  );
+}
+
+/* ==========================================
+   HOST SETTINGS
+========================================== */
+
+function populateHostSettings() {
+  for (const key of KEYS) {
+    $("room-setting-" + key).checked =
+      Boolean(currentSettings[key]);
+  }
+}
+
+async function saveHostSettings() {
+  if (currentRole !== "host") return;
+
+  const values = {};
+
+  for (const key of KEYS) {
+    values[key] =
+      $("room-setting-" + key).checked;
+  }
+
+  const button =
+    $("saveRoomSettingsBtn");
+
+  button.disabled = true;
+
+  try {
+    const reply = await request(
+      "update-meeting-settings",
+      values
+    );
+
+    if (!reply.ok) {
+      throw new Error(reply.error);
+    }
+
+    currentSettings =
+      reply.settings || values;
+
+    toggleModal(
+      "roomSettingsModal",
+      false
+    );
+
+    updateControls();
+
+    notify(
+      "Host permissions updated",
+      "success"
+    );
+  } catch (error) {
+    notify(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/* ==========================================
+   MEETING COUNTDOWN
+========================================== */
+
+function formatTime(seconds) {
+  const number =
+    Math.max(
+      0,
+      Math.floor(seconds)
+    );
+
+  return [
+    Math.floor(number / 3600),
+    Math.floor(
+      number % 3600 / 60
+    ),
+    number % 60
+  ].map(
+    value =>
+      String(value).padStart(2, "0")
+  ).join(":");
+}
+
+function remainingSeconds() {
+  return meetingEndsAt
+    ? Math.max(
+        0,
+        Math.ceil(
+          (meetingEndsAt - Date.now()) /
+          1000
+        )
+      )
+    : 0;
+}
+
+function renderMeetingClock() {
+  $("meetingTimerBlock").hidden =
+    !currentRoom || !meetingEndsAt;
+
+  if (
+    !currentRoom ||
+    !meetingEndsAt
+  ) return;
+
+  $("meetingCountdown").textContent =
+    formatTime(remainingSeconds());
+
+  $("meetingEndInfo").textContent =
+    "Ends " +
+    new Date(
+      meetingEndsAt
+    ).toLocaleTimeString(
+      [],
+      {
+        hour: "2-digit",
+        minute: "2-digit"
+      }
+    );
+
+  if (
+    !$("extendMeetingModal").hidden
+  ) {
+    updateTimePreview();
+  }
+}
+
+/* ==========================================
+   ADD / REDUCE / CUSTOM TIME PREVIEW
+========================================== */
+
+function selectedAdjustment() {
+  const raw =
+    adjustmentPreset === "custom"
+      ? $("customExtensionMinutes").value
+      : adjustmentPreset;
+
+  if (
+    String(raw).trim() === ""
+  ) {
+    return NaN;
+  }
+
+  const value = Number(raw);
+
+  return Number.isInteger(value)
+    ? value
+    : NaN;
+}
+
+function updateTimePreview() {
+  const seconds =
+    remainingSeconds();
+
+  const minutes =
+    selectedAdjustment();
+
+  const signed =
+    (
+      adjustmentMode === "add"
+        ? 1
+        : -1
+    ) * minutes;
+
+  const next =
+    seconds + signed * 60;
+
+  const valid =
+    Number.isInteger(minutes) &&
+    minutes >= 1 &&
+    minutes <= 1440 &&
+    next >= 60 &&
+    next <= 14 * 24 * 3600;
+
+  $("timeCurrentValue").textContent =
+    formatTime(seconds);
+
+  $("timeBeforeValue").textContent =
+    formatTime(seconds);
+
+  $("timePreviewValue").textContent =
+    valid
+      ? formatTime(next)
+      : "--:--:--";
+
+  $("timeAdjustError").textContent =
+    !Number.isInteger(minutes) ||
+    minutes < 1 ||
+    minutes > 1440
+      ? "Enter 1–1440 whole minutes"
+      : next < 60
+        ? "Keep at least 1 minute remaining"
+        : next > 14 * 24 * 3600
+          ? "Maximum remaining time: 14 days"
+          : "";
+
+  $("confirmExtendMeetingBtn").disabled =
+    !valid;
+
+  $("confirmExtendMeetingBtn").textContent =
+    (
+      adjustmentMode === "add"
+        ? "＋ Add "
+        : "− Reduce "
+    ) +
+    (
+      Number.isInteger(minutes)
+        ? minutes
+        : "—"
+    ) +
+    " min";
+
+  $("timeModeInput").value =
+    adjustmentMode;
+
+  $("extensionMinutes").value =
+    adjustmentPreset;
+
+  $("customExtensionFields").hidden =
+    adjustmentPreset !== "custom";
+
+  document.querySelectorAll(
+    "[data-time-mode]"
+  ).forEach(button => {
+    const active =
+      button.dataset.timeMode ===
+      adjustmentMode;
+
+    button.classList.toggle(
+      "is-active",
+      active
+    );
+
+    button.setAttribute(
+      "aria-pressed",
+      String(active)
+    );
+  });
+
+  document.querySelectorAll(
+    "[data-time-preset]"
+  ).forEach(button => {
+    button.classList.toggle(
+      "is-active",
+      button.dataset.timePreset ===
+        adjustmentPreset
+    );
+  });
+}
+
+function openTimeModal() {
+  if (currentRole !== "host") return;
+
+  adjustmentMode = "add";
+  adjustmentPreset = "15";
+
+  $("customExtensionMinutes").value =
+    "10";
+
+  toggleModal(
+    "extendMeetingModal",
+    true
+  );
+
+  updateTimePreview();
+}
+
+/* ==========================================
+   APPLY TIME CHANGE TO SERVER
+========================================== */
+
+async function applyTimeAdjustment() {
+  if (currentRole !== "host") return;
+
+  const minutes =
+    selectedAdjustment();
+
+  const signed =
+    (
+      adjustmentMode === "add"
+        ? 1
+        : -1
+    ) * minutes;
+
+  const next =
+    remainingSeconds() +
+    signed * 60;
+
+  if (
+    !Number.isInteger(minutes) ||
+    minutes < 1 ||
+    minutes > 1440 ||
+    next < 60 ||
+    next > 14 * 24 * 3600
+  ) {
+    return notify(
+      "Choose valid minutes. At least 1 minute must remain.",
+      "error"
+    );
+  }
+
+  const button =
+    $("confirmExtendMeetingBtn");
+
+  button.disabled = true;
+
+  try {
+    // This event will be implemented in
+    // the updated server.js.
+
+    const reply = await request(
+      "adjust-meeting-time",
+      { minutes: signed }
+    );
+
+    if (!reply.ok) {
+      throw new Error(reply.error);
+    }
+
+    applyMeetingTiming(reply);
+
+    toggleModal(
+      "extendMeetingModal",
+      false
+    );
+
+    notify(
+      `Meeting time ${
+        signed > 0
+          ? "increased"
+          : "reduced"
+      } by ${minutes} minute(s)`,
+      "success"
+    );
+  } catch (error) {
+    notify(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/* ==========================================
+   INVITE LINK
+========================================== */
+
+async function copyInvite() {
+  if (!currentRoom) return;
+
+  try {
+    await navigator.clipboard.writeText(
+      meetingLink(currentRoom)
+    );
+
+    notify(
+      "Invite link copied — share the password separately",
+      "success"
+    );
+  } catch {
+    notify(
+      "Clipboard unavailable. Copy the URL from your browser.",
+      "error"
+    );
+  }
+}
+
+/* ==========================================
+   LEAVE / RESET MEETING
 ========================================== */
 
 function resetMeeting() {
-  if (isLeaving) return;
+  const hadRoom =
+    Boolean(currentRoom);
 
-  isLeaving = true;
+  currentRoom = null;
+  currentRole = null;
 
-  for (const id of [...peers.keys()]) {
-    removePeer(id);
-  }
+  meetingEndsAt = null;
+  meetingStartsAt = null;
+
+  isLeaving = false;
+  shareGrantUntil = 0;
+  activeScreenSharer = null;
+
+  selectedMainVideo = "local";
+  myHandRaised = false;
+
+  raisedHands.clear();
+
+  participants = [];
+  waitingRoomUsers = [];
+  screenRequests = [];
+
+  pendingRequests.clear();
+  activeRequest = null;
+  pausedRequestKey = null;
+
+  $("requestPopup").hidden = true;
 
   if (screenStream) {
     screenStream.getTracks().forEach(
-      (track) => track.stop()
+      track => track.stop()
     );
-    screenStream = null;
   }
 
   if (localStream) {
     localStream.getTracks().forEach(
-      (track) => track.stop()
+      track => track.stop()
     );
-    localStream = null;
   }
 
-  currentRoom = null;
-  currentRole = null;
-  participants = [];
+  screenStream = null;
+  localStream = null;
 
-  selectedMainVideo = "local";
-  activeScreenSharer = null;
-  myHandRaised = false;
-  raisedHands.clear();
-  pendingOffers.clear();
+  for (const record of peers.values()) {
+    record.pc.close();
+  }
 
-  $("mainVideoStage").replaceChildren();
+  peers.clear();
+  iceQueue.clear();
+  earlyOffers.clear();
+  pendingPeerReady.clear();
+
   $("videoGrid").replaceChildren();
-  $("participantList").replaceChildren();
-  $("waitingList").replaceChildren();
+  $("mainVideoStage").replaceChildren();
 
-  $("screenShareRequests")?.replaceChildren();
+  $("roomText").textContent = "—";
 
-  $("participantCount").textContent = "0";
-  $("participantsBody").hidden = false;
-
-  $("participantsToggle").textContent = "⌃";
-  $("participantsToggle").setAttribute(
-    "aria-expanded", "true"
-  );
-
-  $("chatPanel").hidden = false;
-  chatVisible = true;
-
-  $("toggleChatBtn").setAttribute(
-    "aria-expanded", "true"
-  );
+  closeAllModals();
+  closeSidebar();
+  closeMoreMenu();
 
   showScreenBanner(null);
-  updateRaisedHandsUI();
-  updateHandControl();
-  updateScreenControl();
+  clearChat();
 
-  control("micBtn", "mic", "Mute");
-  control("cameraBtn", "video", "Stop Video");
+  $("waitingList").replaceChildren();
+  $("screenShareRequests").replaceChildren();
 
-  $("micBtn").disabled = false;
-  $("cameraBtn").disabled = false;
-
-  $("copyBtn").textContent = "⧉ Copy Invite Link";
-
-  clearMeetingChat();
+  $("hostPanel").hidden = true;
 
   if (socket.connected) {
     socket.disconnect();
   }
 
-  history.replaceState(
-    {},
-    "",
-    location.pathname
-  );
+  currentSettings = {
+    ...DEFAULT_SETTINGS
+  };
 
-  showSection(
-    currentUser ? "homeSection" : "loginSection"
-  );
+  updateRequestIndicator();
 
-  isLeaving = false;
+  pendingPage = "home";
+  navigate("home");
+
+  if (hadRoom) {
+    status("You left the meeting");
+  }
+}
+
+function leaveMeeting() {
+  if (isLeaving) return;
+
+  isLeaving = true;
+
+  if (socket.connected) {
+    socket.emit("leave-room");
+  }
+
+  resetMeeting();
 }
 
 /* ==========================================
-   LEAVE / CANCEL MEETING
+   SOCKET.IO EVENTS
 ========================================== */
 
-$("leaveBtn").addEventListener("click", () => {
-  if (socket.connected) {
-    socket.emit("leave-room");
-  }
+socket.on(
+  "join-approved",
+  async data => {
+    try {
+      if (!data?.roomId) return;
 
+      currentSettings =
+        data.settings ||
+        currentSettings;
+
+      applyMeetingTiming(data);
+
+      renderParticipants(
+        data.participants || []
+      );
+
+      enterMeeting(
+        data.roomId,
+        data.role || "participant"
+      );
+
+      await startMedia();
+
+      notify(
+        "You joined the meeting!",
+        "success"
+      );
+    } catch (error) {
+      console.error(error);
+      notify(error.message, "error");
+    }
+  }
+);
+
+socket.on("join-rejected", data => {
   resetMeeting();
-  status("You left the meeting.");
+
+  notify(
+    data?.message ||
+      "Host rejected your request",
+    "error"
+  );
 });
 
-$("cancelWaitingBtn").addEventListener("click", () => {
-  if (socket.connected) {
-    socket.emit("leave-room");
+socket.on("meeting-ended", data => {
+  resetMeeting();
+
+  notify(
+    data?.reason || "Meeting ended",
+    "info"
+  );
+});
+
+socket.on("user-joined", () => {
+  status("A participant joined");
+});
+
+socket.on("user-left", id => {
+  removePeer(id);
+
+  raisedHands.delete(id);
+  updateRaisedHandsUI();
+});
+
+socket.on("participants-updated", data => {
+  if (
+    !currentRoom ||
+    (
+      data?.roomId &&
+      data.roomId !== currentRoom
+    )
+  ) {
+    return;
   }
 
-  resetMeeting();
-  status("Join request cancelled.");
+  if (data.settings) {
+    currentSettings = data.settings;
+  }
+
+  renderParticipants(
+    data.participants || []
+  );
+
+  applyMeetingTiming(data);
+  updateControls();
 });
+
+socket.on(
+  "participant-media-updated",
+  data => {
+    const person = participants.find(
+      item => item.id === data.id
+    );
+
+    if (!person) return;
+
+    person.micEnabled =
+      data.micEnabled;
+
+    person.videoEnabled =
+      data.videoEnabled;
+
+    renderParticipants(participants);
+  }
+);
+
+socket.on("peer-ready", ({ id } = {}) => {
+  if (currentRoom && id) {
+    callPeer(id).catch(console.error);
+  }
+});
+
+socket.on(
+  "signal",
+  ({ from, signal } = {}) => {
+    handleSignal(
+      from,
+      signal
+    ).catch(error => {
+      console.error(
+        "Signal:",
+        error
+      );
+    });
+  }
+);
+
+socket.on("waiting-updated", list => {
+  waitingRoomUsers =
+    Array.isArray(list)
+      ? list
+      : [];
+
+  syncRequestQueue(
+    "join",
+    waitingRoomUsers
+  );
+
+  renderWaitingRequests();
+});
+
+socket.on(
+  "screen-share-requests-updated",
+  list => {
+    screenRequests =
+      Array.isArray(list)
+        ? list
+        : [];
+
+    syncRequestQueue(
+      "share",
+      screenRequests
+    );
+
+    renderWaitingRequests();
+  }
+);
+
+socket.on(
+  "screen-share-approved",
+  () => {
+    shareGrantUntil =
+      Date.now() + 55000;
+
+    updateControls();
+
+    notify(
+      "Approved! Click Share screen within 60 seconds.",
+      "success"
+    );
+  }
+);
+
+socket.on(
+  "screen-share-rejected",
+  data => {
+    notify(
+      data?.message ||
+        "Screen share request declined",
+      "error"
+    );
+  }
+);
+
+socket.on(
+  "screen-share-updated",
+  data => {
+    activeScreenSharer =
+      !data?.sharing
+        ? null
+        : data.id === socket.id
+          ? "local"
+          : data.id;
+
+    refreshRemoteSharing();
+  }
+);
+
+socket.on("hands-updated", data => {
+  raisedHands = new Set(
+    Array.isArray(data?.ids)
+      ? data.ids
+      : []
+  );
+
+  myHandRaised =
+    raisedHands.has(socket.id);
+
+  updateRaisedHandsUI();
+  updateControls();
+});
+
+socket.on(
+  "chat-message",
+  displayChatMessage
+);
 
 /* ==========================================
-   DISCONNECT
+   HOST MEDIA CONTROLS
 ========================================== */
 
+socket.on("force-mute", () => {
+  const track =
+    localStream?.getAudioTracks()[0];
+
+  if (track) {
+    track.enabled = false;
+
+    emitMediaState();
+    updateControls();
+  }
+
+  notify(
+    "Host muted your microphone"
+  );
+});
+
+socket.on("force-video-off", () => {
+  const track =
+    localStream?.getVideoTracks()[0];
+
+  if (track) {
+    track.enabled = false;
+
+    emitMediaState();
+    updateControls();
+    updateVideoPlaceholders();
+  }
+
+  notify(
+    "Host stopped your video"
+  );
+});
+
+socket.on(
+  "request-unmute",
+  () => askConsent("mic")
+);
+
+socket.on(
+  "request-video-on",
+  () => askConsent("camera")
+);
+
+/* ==========================================
+   SERVER SETTINGS / TIME BROADCAST
+========================================== */
+
+socket.on(
+  "meeting-settings-updated",
+  data => {
+    applyMeetingTiming(data);
+
+    if (data?.settings) {
+      currentSettings = data.settings;
+    }
+
+    if (
+      currentRole !== "host" &&
+      localStream
+    ) {
+      if (!currentSettings.mic) {
+        localStream
+          .getAudioTracks()
+          .forEach(track => {
+            track.enabled = false;
+          });
+      }
+
+      if (!currentSettings.camera) {
+        localStream
+          .getVideoTracks()
+          .forEach(track => {
+            track.enabled = false;
+          });
+      }
+
+      emitMediaState();
+    }
+
+    updateControls();
+    updateVideoPlaceholders();
+  }
+);
+
+socket.on(
+  "meeting-time-adjusted",
+  data => {
+    applyMeetingTiming(data);
+
+    if (currentRole !== "host") {
+      notify(
+        "Host changed the meeting time",
+        "success"
+      );
+    }
+  }
+);
+
+socket.on(
+  "meeting-extended",
+  data => {
+    applyMeetingTiming(data);
+  }
+);
+
 socket.on("disconnect", () => {
-  if (currentRoom && !isLeaving) {
+  if (
+    currentRoom &&
+    !isLeaving
+  ) {
     resetMeeting();
 
-    status(
-      "Disconnected from server. Please rejoin."
+    notify(
+      "Disconnected from meeting server",
+      "error"
     );
   }
 });
 
 /* ==========================================
-   INVITATION LINK
+   BUTTON EVENT BINDING
 ========================================== */
 
-const urlParams = new URLSearchParams(location.search);
-const invitedRoom = urlParams.get("room");
+function bind(id, eventName, callback) {
+  $(id)?.addEventListener(
+    eventName,
+    callback
+  );
+}
 
-if (invitedRoom) {
-  $("roomInput").value = invitedRoom;
+function initializeControls() {
+  // Website Navigation
+  // No separate "Meeting" menu in header.
+
+  document.querySelectorAll(
+    "[data-page]"
+  ).forEach(button => {
+    button.addEventListener(
+      "click",
+      event => {
+        event.preventDefault();
+
+        navigate(
+          button.dataset.page
+        );
+      }
+    );
+  });
+
+  /* GOOGLE + GUEST LOGIN */
+
+  bind(
+    "googleLoginBtn",
+    "click",
+    loginGoogle
+  );
+
+  bind(
+    "guestLoginBtn",
+    "click",
+    () => {
+      $("guestNameSection").hidden = false;
+      $("guestName").focus();
+    }
+  );
+
+  bind(
+    "guestContinueBtn",
+    "click",
+    loginGuest
+  );
+
+  bind(
+    "guestName",
+    "keydown",
+    event => {
+      if (event.key === "Enter") {
+        loginGuest();
+      }
+    }
+  );
+
+  /* CREATE AND JOIN */
+
+  bind(
+    "createBtn",
+    "click",
+    createMeeting
+  );
+
+  bind(
+    "joinBtn",
+    "click",
+    joinMeeting
+  );
+
+  /* LEAVE MEETING */
+
+  bind(
+    "cancelWaitingBtn",
+    "click",
+    leaveMeeting
+  );
+
+  bind(
+    "leaveBtn",
+    "click",
+    leaveMeeting
+  );
+
+  bind(
+    "roomMobileLeaveBtn",
+    "click",
+    leaveMeeting
+  );
+
+  bind(
+    "moreLeaveBtn",
+    "click",
+    leaveMeeting
+  );
+
+  /* INVITE LINK */
+
+  bind(
+    "copyBtn",
+    "click",
+    copyInvite
+  );
+
+  bind(
+    "moreInviteBtn",
+    "click",
+    () => {
+      closeMoreMenu();
+      copyInvite();
+    }
+  );
+
+  /* MICROPHONE */
+
+  bind(
+    "micBtn",
+    "click",
+    () => {
+      const track =
+        localStream?.getAudioTracks()[0];
+
+      if (!track) return;
+
+      if (
+        currentRole !== "host" &&
+        !currentSettings.mic
+      ) {
+        return notify(
+          "Host disabled microphone",
+          "error"
+        );
+      }
+
+      track.enabled = !track.enabled;
+
+      emitMediaState();
+      updateControls();
+    }
+  );
+
+  /* CAMERA */
+
+  bind(
+    "cameraBtn",
+    "click",
+    () => {
+      const track =
+        localStream?.getVideoTracks()[0];
+
+      if (!track) return;
+
+      if (
+        currentRole !== "host" &&
+        !currentSettings.camera
+      ) {
+        return notify(
+          "Host disabled camera",
+          "error"
+        );
+      }
+
+      track.enabled = !track.enabled;
+
+      emitMediaState();
+      updateControls();
+      updateVideoPlaceholders();
+    }
+  );
+
+  /* SCREEN SHARE */
+
+  bind(
+    "screenBtn",
+    "click",
+    toggleScreen
+  );
+
+  /* RAISE HAND */
+
+  async function toggleHand() {
+    if (!currentRoom) return;
+
+    try {
+      const reply = await request(
+        "raise-hand",
+        {
+          raised: !myHandRaised
+        }
+      );
+
+      if (!reply.ok) {
+        throw new Error(reply.error);
+      }
+
+      myHandRaised = !myHandRaised;
+
+      updateControls();
+    } catch (error) {
+      notify(error.message, "error");
+    }
+  }
+
+  bind(
+    "raiseHandBtn",
+    "click",
+    toggleHand
+  );
+
+  bind(
+    "moreHandBtn",
+    "click",
+    () => {
+      closeMoreMenu();
+      toggleHand();
+    }
+  );
+
+  /* PEOPLE, CHAT AND REQUESTS */
+
+  bind(
+    "toggleParticipantsBtn",
+    "click",
+    () => openSidebar("people")
+  );
+
+  bind(
+    "toggleChatBtn",
+    "click",
+    () => {
+      $("toggleChatBtn").classList.remove(
+        "has-unread"
+      );
+
+      openSidebar("chat");
+    }
+  );
+
+  bind(
+    "toggleRequestsBtn",
+    "click",
+    () => openSidebar("requests")
+  );
+
+  bind(
+    "roomRequestsBtn",
+    "click",
+    () => openSidebar("requests")
+  );
+
+  bind(
+    "showParticipantsTab",
+    "click",
+    () => {
+      sidebarTab = null;
+      openSidebar("people");
+    }
+  );
+
+  bind(
+    "showChatTab",
+    "click",
+    () => {
+      sidebarTab = null;
+      openSidebar("chat");
+    }
+  );
+
+  bind(
+    "showRequestsTab",
+    "click",
+    () => {
+      sidebarTab = null;
+      openSidebar("requests");
+    }
+  );
+
+  bind(
+    "closeSidebarBtn",
+    "click",
+    closeSidebar
+  );
+
+  /* MORE MENU */
+
+  bind(
+    "moreBtn",
+    "click",
+    toggleMoreMenu
+  );
+
+  bind(
+    "morePeopleBtn",
+    "click",
+    () => openSidebar("people")
+  );
+
+  bind(
+    "moreRequestsBtn",
+    "click",
+    () => openSidebar("requests")
+  );
+
+  bind(
+    "participantsToggle",
+    "click",
+    () => {
+      const body = $("participantsBody");
+
+      body.hidden = !body.hidden;
+
+      $("participantsToggle").textContent =
+        body.hidden ? "⌄" : "⌃";
+
+      $("participantsToggle").setAttribute(
+        "aria-expanded",
+        String(!body.hidden)
+      );
+    }
+  );
+
+  /* CHAT IMAGE */
+
+  bind(
+    "attachImageBtn",
+    "click",
+    () => $("chatImageInput").click()
+  );
+
+  bind(
+    "chatImageInput",
+    "change",
+    () => {
+      const file =
+        $("chatImageInput").files[0];
+
+      if (!file) return;
+
+      const allowed = [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif"
+      ];
+
+      if (
+        !allowed.includes(file.type) ||
+        file.size > 2 * 1024 * 1024
+      ) {
+        clearSelectedImage();
+
+        notify(
+          "Use JPG, PNG, WEBP or GIF under 2 MB",
+          "error"
+        );
+
+        return;
+      }
+
+      selectedImage = file;
+
+      if (imagePreviewUrl) {
+        URL.revokeObjectURL(
+          imagePreviewUrl
+        );
+      }
+
+      imagePreviewUrl =
+        URL.createObjectURL(file);
+
+      $("chatImageThumbnail").src =
+        imagePreviewUrl;
+
+      $("chatImageFilename").textContent =
+        file.name;
+
+      $("chatImagePreview").hidden =
+        false;
+    }
+  );
+
+  bind(
+    "removeChatImageBtn",
+    "click",
+    clearSelectedImage
+  );
+
+  bind(
+    "chatForm",
+    "submit",
+    sendChat
+  );
+
+  /* REQUEST POPUP */
+
+  bind(
+    "requestApproveBtn",
+    "click",
+    () => replyToRequest(true)
+  );
+
+  bind(
+    "requestRejectBtn",
+    "click",
+    () => replyToRequest(false)
+  );
+
+  bind(
+    "requestLaterBtn",
+    "click",
+    () => {
+      pausedRequestKey =
+        activeRequest?.key || null;
+
+      $("requestPopup").hidden = true;
+
+      if (currentRole === "host") {
+        openSidebar("requests");
+      }
+    }
+  );
+
+  /* CREATE SETTINGS */
+
+  bind(
+    "openCreateSettingsBtn",
+    "click",
+    () => {
+      createSettingsTab(true);
+      updateCreateSummary();
+
+      toggleModal(
+        "createSettingsModal",
+        true
+      );
+    }
+  );
+
+  bind(
+    "closeCreateSettingsBtn",
+    "click",
+    () => toggleModal(
+      "createSettingsModal",
+      false
+    )
+  );
+
+  bind(
+    "createGeneralTab",
+    "click",
+    () => createSettingsTab(true)
+  );
+
+  bind(
+    "createPermissionsTab",
+    "click",
+    () => createSettingsTab(false)
+  );
+
+  bind(
+    "meetingDuration",
+    "change",
+    updateCreateSummary
+  );
+
+  bind(
+    "meetingCustomDuration",
+    "input",
+    updateCreateSummary
+  );
+
+  bind(
+    "meetingType",
+    "change",
+    updateCreateSummary
+  );
+
+  bind(
+    "setting-approval",
+    "change",
+    updateCreateSummary
+  );
+
+  bind(
+    "saveCreateSettingsBtn",
+    "click",
+    () => {
+      try {
+        createMeetingPayload(
+          "demo-password"
+        );
+
+        updateCreateSummary();
+
+        toggleModal(
+          "createSettingsModal",
+          false
+        );
+
+        notify(
+          "Meeting settings saved",
+          "success"
+        );
+      } catch (error) {
+        createSettingsTab(true);
+        notify(error.message, "error");
+      }
+    }
+  );
+
+  /* HOST SETTINGS */
+
+  bind(
+    "roomSettingsBtn",
+    "click",
+    () => {
+      populateHostSettings();
+
+      toggleModal(
+        "roomSettingsModal",
+        true
+      );
+    }
+  );
+
+  bind(
+    "moreSettingsBtn",
+    "click",
+    () => {
+      closeMoreMenu();
+      $("roomSettingsBtn").click();
+    }
+  );
+
+  bind(
+    "closeRoomSettingsBtn",
+    "click",
+    () => toggleModal(
+      "roomSettingsModal",
+      false
+    )
+  );
+
+  bind(
+    "saveRoomSettingsBtn",
+    "click",
+    saveHostSettings
+  );
+
+  /* ADJUST MEETING TIME */
+
+  bind(
+    "extendMeetingBtn",
+    "click",
+    openTimeModal
+  );
+
+  bind(
+    "moreAdjustTimeBtn",
+    "click",
+    () => {
+      closeMoreMenu();
+      openTimeModal();
+    }
+  );
+
+  bind(
+    "closeExtendMeetingBtn",
+    "click",
+    () => toggleModal(
+      "extendMeetingModal",
+      false
+    )
+  );
+
+  bind(
+    "cancelTimeAdjustBtn",
+    "click",
+    () => toggleModal(
+      "extendMeetingModal",
+      false
+    )
+  );
+
+  document.querySelectorAll(
+    "[data-time-mode]"
+  ).forEach(button => {
+    button.addEventListener(
+      "click",
+      () => {
+        adjustmentMode =
+          button.dataset.timeMode;
+
+        updateTimePreview();
+      }
+    );
+  });
+
+  document.querySelectorAll(
+    "[data-time-preset]"
+  ).forEach(button => {
+    button.addEventListener(
+      "click",
+      () => {
+        adjustmentPreset =
+          button.dataset.timePreset;
+
+        updateTimePreview();
+
+        if (
+          adjustmentPreset === "custom"
+        ) {
+          $("customExtensionMinutes").focus();
+        }
+      }
+    );
+  });
+
+  bind(
+    "customExtensionMinutes",
+    "input",
+    updateTimePreview
+  );
+
+  bind(
+    "confirmExtendMeetingBtn",
+    "click",
+    applyTimeAdjustment
+  );
+
+  /* MODAL BACKDROP */
+
+  for (const id of [
+    "createSettingsModal",
+    "roomSettingsModal",
+    "extendMeetingModal"
+  ]) {
+    bind(
+      id,
+      "click",
+      event => {
+        if (event.target === $(id)) {
+          toggleModal(id, false);
+        }
+      }
+    );
+  }
+
+  document.addEventListener(
+    "keydown",
+    event => {
+      if (event.key === "Escape") {
+        closeAllModals();
+        closeMoreMenu();
+      }
+    }
+  );
+
+  /* LIGHT / DARK THEME */
+
+  bind(
+    "themeToggle",
+    "click",
+    () => {
+      const light =
+        document.body.classList.toggle(
+          "light-mode"
+        );
+
+      $("themeToggle").textContent =
+        light ? "☾ Dark" : "☀ Light";
+
+      try {
+        localStorage.setItem(
+          "meetspace-theme",
+          light ? "light" : "dark"
+        );
+      } catch {}
+    }
+  );
+
+  try {
+    if (
+      localStorage.getItem(
+        "meetspace-theme"
+      ) === "light"
+    ) {
+      document.body.classList.add(
+        "light-mode"
+      );
+
+      $("themeToggle").textContent =
+        "☾ Dark";
+    }
+  } catch {}
+
+  /* INVITE URL HANDLING */
+
+  const invite =
+    new URLSearchParams(
+      location.search
+    ).get("room");
+
+  if (
+    invite &&
+    /^[a-f0-9]{10}$/i.test(invite)
+  ) {
+    $("roomInput").value = invite;
+
+    navigate(
+      "join",
+      true
+    );
+  } else {
+    navigate(
+      "home",
+      true
+    );
+  }
+
+  /* FINAL INITIALIZATION */
+
+  updateCreateSummary();
+  updateControls();
+  syncHostActions();
+
+  restoreSession();
+
+  setInterval(
+    renderMeetingClock,
+    1000
+  );
 
   status(
-    "Meeting invitation detected. Sign in to continue."
+    "Welcome to MeetSpace"
   );
 }
 
 /* ==========================================
-   INITIALIZE
+   START MEETSPACE
 ========================================== */
 
-control("micBtn", "mic", "Mute");
-control("cameraBtn", "video", "Stop Video");
-control("screenBtn", "screen", "Share Screen");
-control("raiseHandBtn", "hand", "Raise Hand");
-control("toggleChatBtn", "chat", "Chat");
-control("leaveBtn", "leave", "Leave");
+initializeControls();
 
-showSection("loginSection");
-restoreFirebaseSession();
-
-console.log("MeetSpace frontend loaded.");
+/* ==========================================
+   END OF COMPLETE MEETSPACE SCRIPT.JS
+   PART 1 + PART 2 + PART 3
+========================================== */
