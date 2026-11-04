@@ -3,350 +3,461 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#101421">
-  <meta name="description" content="MeetSpace — simple, private video meetings with chat, screen sharing and host controls.">
-  <title>MeetSpace | Meet Better, Together</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0d1120">
+  <title>MeetSpace | Video Meetings</title>
+  <meta name="description" content="MeetSpace - private video meetings, chat and screen sharing.">
   <link rel="stylesheet" href="/style.css">
-  <style>[hidden] { display: none !important; }</style>
+  <style>
+    [hidden] { display: none !important; }
+    body[data-view="meeting"] #topbar,
+    body[data-view="meeting"] .site-footer,
+    body[data-view="waiting"] .site-footer { display: none !important; }
+    body[data-view="meeting"] #home,
+    body[data-view="waiting"] #home,
+    body[data-view="features"] #home,
+    body[data-view="support"] #home { display: none !important; }
+    body:not([data-view="features"]) #features,
+    body:not([data-view="support"]) #support { display: none !important; }
+    body[data-invite="true"] .main-nav,
+    body[data-invite="true"] .landing-hero,
+    body[data-invite="true"] #createMeetingCard,
+    body[data-invite="true"] .bottom-caption { display: none !important; }
+    .ms-room-actions { display:flex;align-items:center;flex-wrap:wrap;gap:8px; }
+    .ms-room-action { border:1px solid var(--border);background:var(--surface-2);
+      color:var(--text);border-radius:10px;padding:9px 12px;font-weight:800;font-size:12px; }
+    .ms-room-action:disabled { opacity:.55; }
+    .ms-room-duration { display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+      margin-top:10px;color:var(--muted);font-size:12px; }
+    .ms-room-duration strong { color:var(--text); }
+    .ms-custom-duration { display:grid;gap:6px;margin-top:6px; }
+    .ms-room-modal { position:fixed;inset:0;z-index:2000;display:grid;place-items:center;
+      padding:16px;background:rgba(5,8,19,.76); }
+    .ms-room-dialog { width:min(440px,100%);max-height:90dvh;overflow:auto;
+      padding:22px;background:var(--surface);color:var(--text);border:1px solid var(--border);
+      border-radius:17px;box-shadow:0 25px 70px #0006; }
+    .ms-dialog-heading { display:flex;align-items:center;justify-content:space-between;gap:10px; }
+    .ms-dialog-heading h3 { margin:0;font-size:19px; }
+    .ms-dialog-close { border:0;background:var(--surface-2);color:var(--text);
+      border-radius:8px;padding:6px 11px; }
+    .ms-dialog-actions { display:flex;gap:9px;justify-content:flex-end;margin-top:20px; }
+    .ms-dialog-primary { padding:10px 16px;border:0;border-radius:9px;
+      background:#7468eb;color:#fff;font-weight:800; }
+    .ms-dialog-primary:disabled { opacity:.5; }
+    .ms-control-placeholder { color:var(--muted);font-size:11px; }
+    .ms-room-tabs { display:flex;gap:7px;margin-bottom:12px;flex-wrap:wrap; }
+    .ms-room-tab { padding:8px 12px;border:1px solid var(--border);border-radius:9px;
+      background:var(--surface-2);color:var(--text);font-weight:800;font-size:12px; }
+    .ms-room-tab.is-active { background:#7468eb;color:#fff; }
+    .ms-room-sidebar { display:flex;flex-direction:column;gap:12px;min-width:0; }
+    .ms-room-sidebar #participantsPanel { margin-top:0; }
+    .ms-room-sidebar #chatPanel { height:clamp(390px,68vh,680px); }
+    .ms-room-sidebar #participantsPanel:not([hidden]) { max-height:70vh;overflow-y:auto; }
+    @media(max-width:1050px) { .ms-room-sidebar #participantsPanel:not([hidden]) { max-height:380px; } }
+  </style>
 </head>
 <body data-view="home">
   <div class="ambient ambient-one" aria-hidden="true"></div>
   <div class="ambient ambient-two" aria-hidden="true"></div>
+  <div class="ambient ambient-three" aria-hidden="true"></div>
 
-  <!-- WEBSITE HEADER (NOT SHOWN DURING A CALL) -->
-  <header id="topbar" class="topbar">
-    <a href="#home" id="brandHome" class="brand" data-page="home" aria-label="MeetSpace home">
-      <span class="brand-icon" aria-hidden="true">MS</span>
+  <header class="topbar" id="topbar">
+    <a href="#home" id="brandHome" class="brand" aria-label="MeetSpace Home">
+      <span class="brand-icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64" width="39" height="39" fill="none">
+          <path d="M8 47L22 17L34 39L43 20" stroke="#A58FFF" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M54 18C47 13 39 17 39 24C39 33 56 30 56 41C56 51 42 53 35 46" stroke="#7468eb" stroke-width="8" stroke-linecap="round"/>
+        </svg>
+      </span>
       <span class="brand-wordmark">Meet<span class="brand-accent">Space</span></span>
     </a>
-    <nav class="main-nav" aria-label="Main navigation">
-      <a href="#home" data-page="home" class="nav-link active">Home</a>
-      <a href="#features" data-page="features" class="nav-link">Features</a>
-      <a href="#support" data-page="support" class="nav-link">Help</a>
+    <nav class="main-nav" aria-label="Main Navigation">
+      <a href="#home" class="nav-link active" data-page="home">Home</a>
+      <a href="#features" class="nav-link" data-page="features">Features</a>
+      <a href="#support" class="nav-link" data-page="support">Support</a>
+      <a href="#create" class="nav-link create-room-nav" data-page="create">+ Create Room</a>
     </nav>
     <div class="header-actions">
-      <span id="userInfo" class="user-chip" aria-live="polite">Guest</span>
-      <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch color theme">☀ Light</button>
-      <button id="headerJoinBtn" class="header-join-btn" type="button" data-page="join">Join meeting</button>
-      <button id="headerCreateBtn" class="header-create-btn" type="button" data-page="create">＋ Start meeting</button>
+      <span id="userInfo" class="user-chip">Not signed in</span>
+      <button id="themeToggle" class="theme-toggle" type="button">☀️ Light Mode</button>
     </div>
   </header>
 
-  <main id="appMain" class="container">
+  <main class="container">
     <div id="home">
-      <!-- HOME PAGE -->
-      <section id="landingSection" class="landing-hero">
-        <div class="landing-copy">
-          <span class="hero-badge"><span class="live-dot"></span> SIMPLE &amp; SECURE VIDEO MEETINGS</span>
-          <h1 class="landing-title">Better meetings.<span class="gradient-text">Less effort.</span></h1>
-          <p class="landing-description">Start a meeting, share your ideas and stay connected. Clear controls, private rooms and a meeting experience that feels easy.</p>
-          <div class="hero-actions">
-            <button id="heroCreateBtn" class="primary-btn" type="button" data-page="create">＋ Start a meeting</button>
-            <button id="heroJoinBtn" class="secondary-btn" type="button" data-page="join">↗ Join a meeting</button>
-          </div>
-          <div class="hero-highlights"><span>✓ Up to 10 people</span><span>✓ Google or Guest</span><span>✓ Private rooms</span></div>
-        </div>
-        <div class="hero-preview panel" aria-label="Illustration of a four-person meeting">
-          <div class="hero-preview-heading"><span class="live-dot"></span> Meeting preview <span class="hero-preview-count">4 people</span></div>
-          <div class="hero-preview-grid" aria-hidden="true">
-            <div class="hero-preview-person"><span>🙂</span><small>You</small></div>
-            <div class="hero-preview-person"><span>👨‍💻</span><small>Rifat</small></div>
-            <div class="hero-preview-person"><span>👩‍💼</span><small>Sadia</small></div>
-            <div class="hero-preview-person"><span>👩‍💻</span><small>Nabila</small></div>
-          </div>
-          <div class="hero-preview-actions" aria-hidden="true"><span>🎙</span><span>▣</span><span>▤</span><span>☏</span></div>
-        </div>
-      </section>
-      <section id="homeBenefits" class="home-benefits" aria-label="Why MeetSpace">
-        <article class="benefit-card panel"><span class="benefit-symbol">🔒</span><h3>Privacy comes first</h3><p>Password protection and host-approved entry.</p></article>
-        <article class="benefit-card panel"><span class="benefit-symbol">⚡</span><h3>Simple from the start</h3><p>Join or create with just a few clear steps.</p></article>
-        <article class="benefit-card panel"><span class="benefit-symbol">🖥</span><h3>Present, talk and chat</h3><p>Your meeting tools, all in one place.</p></article>
+      <section class="landing-hero">
+        <div class="hero-badge"><span class="live-dot"></span> SECURE · SIMPLE · TOGETHER</div>
+        <h1 class="landing-title">Meet, Collaborate <span class="gradient-text">Together.</span></h1>
+        <p class="landing-description">Video meetings, real-time chat and screen sharing — all in one secure space.</p>
+        <div class="hero-highlights"><span>✦ Connect</span><span>✦ Collaborate</span><span>✦ Communicate</span></div>
       </section>
 
-      <!-- AUTHENTICATION: JS REVEALS WHEN NEEDED -->
-      <section id="loginSection" class="panel auth-card" hidden>
-        <div class="eyebrow">WELCOME TO MEETSPACE</div>
-        <h2>Continue to your meeting</h2>
-        <p class="section-intro">Sign in with Google or use a guest name to create or join.</p>
+      <section id="loginSection" class="panel auth-card">
+        <div class="eyebrow"><span class="live-dot"></span> START YOUR EXPERIENCE</div>
+        <div class="hero-symbol" aria-hidden="true">✦</div>
+        <h2>Your space to <span class="gradient-text">connect.</span></h2>
+        <p class="section-intro">Sign in to create a meeting or join a room.</p>
         <div class="login-options">
           <button id="googleLoginBtn" class="google-btn" type="button"><span class="google-g">G</span> Continue with Google</button>
           <button id="guestLoginBtn" class="secondary-btn" type="button">✧ Continue as Guest</button>
         </div>
         <div id="guestNameSection" class="guest-form" hidden>
           <label for="guestName">Your display name</label>
-          <input id="guestName" type="text" maxlength="60" placeholder="Enter your name" autocomplete="nickname">
-          <button id="guestContinueBtn" class="primary-btn" type="button">Continue →</button>
+          <input id="guestName" type="text" maxlength="60" placeholder="What should we call you?" autocomplete="nickname">
+          <button id="guestContinueBtn" type="button">Enter MeetSpace →</button>
         </div>
-        <p class="helper-text">No separate account needed for guest access.</p>
+        <p class="helper-text">Free to get started. No credit card required.</p>
       </section>
 
-      <!-- CREATE AND JOIN ARE SEPARATE SCREENS -->
       <section id="homeSection" class="home-wrap" hidden>
-        <div id="createPage" class="action-page" hidden>
-          <div class="page-heading"><span class="eyebrow">CREATE YOUR SPACE</span><h2>Start a meeting</h2><p>Just enter a password. Advanced options are completely optional.</p></div>
-          <div class="meeting-options">
-            <div class="option-card panel" id="createMeetingCard">
-              <div class="feature-icon purple">🎥</div>
-              <h2>Create a meeting</h2>
-              <p>Set up a private meeting for you and up to 9 other people.</p>
-              <label for="createPassword">Meeting password</label>
-              <div class="password-visibility">
-                <input id="createPassword" type="password" minlength="4" maxlength="64" placeholder="At least 4 characters" autocomplete="new-password">
-                <button class="password-eye" type="button" data-password-toggle="createPassword" aria-label="Show password" aria-pressed="false"><span class="password-eye-icon" aria-hidden="true">◉</span><span class="password-eye-word">Show</span></button>
-              </div>
-              <button id="openCreateSettingsBtn" class="ms-settings-trigger" type="button" aria-haspopup="dialog" aria-controls="createSettingsModal"><span><strong>⚙ Meeting settings</strong><small id="createSettingsSummary">60 minutes · Waiting room on</small></span><span class="ms-trigger-edit">Edit ↗</span></button>
-              <button id="createBtn" class="primary-btn" type="button">Create meeting →</button>
-              <p class="field-footnote">You can adjust permissions and time after creating the meeting.</p>
+        <div class="page-heading">
+          <div class="eyebrow"><span class="live-dot"></span> READY WHEN YOU ARE</div>
+          <h2>Your next great <span class="gradient-text">conversation.</span></h2>
+          <p>Create a room or join a meeting with your team, class or friends.</p>
+        </div>
+        <div class="meeting-options">
+          <div class="option-card panel" id="createMeetingCard">
+            <div class="feature-icon purple">🎥</div>
+            <h2>Create a meeting</h2>
+            <p>Set up a secure room for up to 10 people, including the host.</p>
+            <label for="createPassword">Meeting password</label>
+            <div class="password-visibility">
+              <input id="createPassword" type="password" minlength="4" maxlength="64" placeholder="At least 4 characters" autocomplete="new-password">
+              <button type="button" class="password-eye" data-password-toggle="createPassword" aria-label="Show password"></button>
             </div>
-            <aside class="action-info panel"><h3>Ready for a smoother meeting</h3><div class="action-info-item"><span>🔐</span><div><strong>Secure access</strong><small>Only people with your password can request entry.</small></div></div><div class="action-info-item"><span>🔔</span><div><strong>Easy approvals</strong><small>Get a popup when a guest wants to join.</small></div></div><div class="action-info-item"><span>◷</span><div><strong>Flexible timing</strong><small>Add, reduce or set custom minutes later.</small></div></div><div class="action-info-item"><span>⚙</span><div><strong>Host controls</strong><small>Choose what participants can do.</small></div></div></aside>
+            <button id="createBtn" type="button">Create meeting ↗</button>
+          </div>
+          <div class="option-card panel" id="joinMeetingCard">
+            <div class="feature-icon pink">↗</div>
+            <h2>Join a meeting</h2>
+            <p>Enter your meeting details to request access.</p>
+            <label for="roomInput">Meeting ID</label>
+            <input id="roomInput" type="text" placeholder="Enter meeting ID" autocomplete="off">
+            <label for="joinPassword">Meeting password</label>
+            <div class="password-visibility">
+              <input id="joinPassword" type="password" placeholder="Enter password" autocomplete="current-password">
+              <button type="button" class="password-eye" data-password-toggle="joinPassword" aria-label="Show password"></button>
+            </div>
+            <button id="joinBtn" type="button">Request to join →</button>
           </div>
         </div>
-
-        <div id="joinPage" class="action-page" hidden>
-          <div class="page-heading"><span class="eyebrow">JOIN THE CONVERSATION</span><h2>Join a meeting</h2><p>Use the meeting ID and password your host shared.</p></div>
-          <div class="meeting-options">
-            <div id="joinMeetingCard" class="option-card panel">
-              <div class="feature-icon pink">↗</div><h2>Join a meeting</h2><p>Request access to a meeting in two simple steps.</p>
-              <label for="roomInput">Meeting ID</label><input id="roomInput" type="text" placeholder="Enter meeting ID" autocomplete="off" inputmode="text">
-              <label for="joinPassword">Meeting password</label>
-              <div class="password-visibility">
-                <input id="joinPassword" type="password" placeholder="Enter meeting password" autocomplete="current-password">
-                <button class="password-eye" type="button" data-password-toggle="joinPassword" aria-label="Show password" aria-pressed="false"><span class="password-eye-icon" aria-hidden="true">◉</span><span class="password-eye-word">Show</span></button>
-              </div>
-              <button id="joinBtn" class="primary-btn" type="button">Request to join →</button>
-              <p class="field-footnote">If the waiting room is enabled, the host will approve your request.</p>
-            </div>
-            <aside class="action-info panel"><h3>What happens next?</h3><div class="action-info-item"><span>1</span><div><strong>Enter the details</strong><small>Use the meeting ID and password from your invitation.</small></div></div><div class="action-info-item"><span>2</span><div><strong>Wait for approval</strong><small>The host may need to let you in.</small></div></div><div class="action-info-item"><span>3</span><div><strong>Start connecting</strong><small>Use microphone, video, chat and screen sharing.</small></div></div></aside>
-          </div>
-        </div>
+        <p class="bottom-caption">✧ Built for real connections, big and small.</p>
       </section>
     </div>
 
-    <!-- WAITING ROOM -->
     <section id="waitingSection" class="panel waiting-card" hidden>
-      <div class="waiting-symbol">⌛</div><span class="eyebrow">REQUEST SENT</span>
+      <div class="waiting-symbol">⌛</div>
+      <div class="eyebrow">ALMOST THERE</div>
       <h2>Waiting for host approval</h2>
-      <p>Your request has been sent. You will enter the meeting when the host approves it.</p>
-      <div class="waiting-animation" aria-hidden="true"><span></span><span></span><span></span></div>
+      <p>Your request has been sent. The host will let you in when they're ready.</p>
+      <div class="waiting-animation"><span></span><span></span><span></span></div>
       <button id="cancelWaitingBtn" class="secondary-btn" type="button">Cancel request</button>
     </section>
 
-    <!-- MEETING ROOM: HEADER + EXPANDABLE GALLERY + RIGHT DRAWER -->
+    
     <section id="meetingSection" hidden>
-      <header class="meeting-header panel">
+      <div class="meeting-header panel">
         <div class="meeting-heading">
-          <div class="meeting-heading-line"><span class="meeting-brand">Meet<span class="brand-accent">Space</span></span><span class="meeting-live-badge"><span class="live-dot"></span> LIVE MEETING</span></div>
+          <span class="meeting-live-badge"><span class="live-dot"></span> LIVE MEETING</span>
           <h2>MeetSpace Meeting</h2>
-          <div class="meeting-meta"><span>Room ID: <strong id="roomText">—</strong></span><span id="roleText">Participant</span></div>
+          <div class="meeting-meta">
+            <span>Meeting ID: <strong id="roomText"></strong></span>
+            <span id="roleText">Role: Participant</span>
+          </div>
+          <div id="meetingTimerBlock" class="ms-room-duration" hidden>
+            <span>⏱ Time Remaining: <strong id="meetingCountdown">--:--:--</strong></span>
+            <span id="meetingEndInfo"></span>
+          </div>
         </div>
         <div class="ms-room-actions">
-          <div id="meetingTimerBlock" class="meeting-timer" hidden><span>◷ Time remaining</span><strong id="meetingCountdown">--:--:--</strong><small id="meetingEndInfo"></small></div>
-          <button id="copyBtn" class="ms-room-action" type="button">⧉ Invite</button>
+          <button id="copyBtn" class="secondary-btn" type="button">⧉ Copy Invite Link</button>
           <button id="roomSettingsBtn" class="ms-room-action" type="button" hidden>⚙ Settings</button>
-          <button id="extendMeetingBtn" class="ms-room-action primary" type="button" hidden>◷ Adjust Time</button>
-          <button id="roomRequestsBtn" class="ms-room-action request-bell" type="button" hidden aria-label="Open requests">🔔 <span id="roomRequestCountTop" class="request-count" hidden>0</span></button>
-          <button id="roomMobileLeaveBtn" class="ms-room-action mobile-room-leave" type="button">Leave</button>
+          <button id="extendMeetingBtn" class="ms-room-action" type="button" hidden>◷ Extend Time</button>
         </div>
-      </header>
+      </div>
 
-      <div id="meetingLayout" class="meeting-layout">
+      <div class="meeting-layout" id="meetingLayout">
         <div class="video-area">
-          <div class="video-area-heading"><div><h3 id="galleryHeading">Gallery view</h3><p id="galleryHint">Click a video to focus it when the participant count is odd.</p></div><span id="galleryParticipantBadge" class="gallery-count">Meeting</span></div>
+          <div class="video-area-heading">
+            <div><h3>Gallery View</h3><p>Click a face to focus it in an odd-sized meeting.</p></div>
+          </div>
           <div id="videoStage" class="video-stage ms-gallery-view">
-            <div id="mainVideoStage" class="main-video-stage" hidden></div>
+            <div id="mainVideoStage" class="main-video-stage"></div>
             <div id="videoGrid" class="video-grid ms-gallery"></div>
           </div>
-          <div id="screenShareBanner" class="screen-share-banner" hidden><span class="screen-share-dot"></span><span id="screenShareName">Screen sharing</span></div>
+          <div id="screenShareBanner" class="screen-share-banner" hidden>
+            <span id="screenShareName">Screen sharing</span>
+          </div>
         </div>
 
-        <!-- DESKTOP DRAWER IS CLOSED BY DEFAULT -->
-        <aside id="meetingSidebar" class="ms-room-sidebar" aria-label="Meeting side panel" hidden>
-          <div class="sidebar-top"><div><h3 id="sidebarPanelTitle">Participants</h3><p id="sidebarPanelSubtitle">People in this meeting</p></div><button id="closeSidebarBtn" class="sidebar-close" type="button" aria-label="Close side panel">✕</button></div>
-          <div class="ms-room-tabs" aria-label="Meeting panel tabs">
-            <button id="showParticipantsTab" class="ms-room-tab is-active" type="button">People</button>
-            <button id="showChatTab" class="ms-room-tab" type="button">Chat</button>
-            <button id="showRequestsTab" class="ms-room-tab" type="button" hidden>Requests <span id="roomRequestCount">0</span></button>
+        <aside class="ms-room-sidebar">
+          <div class="ms-room-tabs" aria-label="Meeting sidebar tabs">
+            <button id="showParticipantsTab" type="button" class="ms-room-tab is-active">♧ People</button>
+            <button id="showChatTab" type="button" class="ms-room-tab">▤ Chat</button>
+            <button id="showRequestsTab" type="button" class="ms-room-tab" hidden>🔔 Requests <span id="roomRequestCount">0</span></button>
           </div>
-          <div id="participantsPanel" class="participants-panel">
-            <div class="participants-header"><h3>Participants <span id="participantCount" class="participant-count">(0/10)</span></h3><button id="participantsToggle" type="button" aria-expanded="true" aria-label="Toggle participant list">⌃</button></div>
-            <div id="participantsBody"><div id="participantList"></div></div>
-            <div id="raisedHandsBar" class="raised-hands-bar" hidden><strong>✋ Raised hands: <span id="raisedHandCount">0</span></strong><div id="raisedHandsNames" class="raised-hands-names"></div></div>
+          <div id="participantsPanel" class="panel participants-panel">
+            <div class="participants-header">
+              <h3>Participants <span id="participantCount" class="participant-count">(0/10)</span></h3>
+              <button id="participantsToggle" type="button" aria-expanded="true" aria-label="Collapse participants">⌃</button>
+            </div>
+            <div id="participantsBody">
+              <div id="participantList"></div>
+              <div id="hostPanel" hidden>
+                <div class="host-panel-heading">
+                  <h3>Host Controls</h3>
+                  <p>Manage join requests and participants.</p>
+                </div>
+                <h4>Waiting Room Requests</h4>
+                <div id="waitingList"><p>No pending requests</p></div>
+                <div id="screenShareRequests"></div>
+              </div>
+            </div>
           </div>
-          <div id="chatPanel" class="chat-panel" hidden>
-            <div class="chat-header"><h3>Meeting chat</h3><span class="chat-live">● Live</span></div>
-            <div class="chat-recipient"><label for="chatRecipient">Send to</label><select id="chatRecipient"><option value="everyone">Everyone (Public)</option></select></div>
-            <div id="chatMessages" class="chat-messages"><div class="chat-empty">No messages yet. Start a conversation!</div></div>
-            <div id="chatImagePreview" class="chat-image-preview" hidden><img id="chatImageThumbnail" alt="Attached image preview"><span id="chatImageFilename"></span><button id="removeChatImageBtn" type="button" aria-label="Remove attachment">✕</button></div>
-            <form id="chatForm" class="chat-form"><input id="chatImageInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden><button id="attachImageBtn" type="button" aria-label="Attach an image">＋</button><input id="chatInput" type="text" maxlength="2000" placeholder="Type a message..." autocomplete="off"><button id="chatSendBtn" type="submit">Send</button></form>
+
+          <div id="chatPanel" class="chat-panel panel" hidden>
+            <div class="chat-header">
+              <div><h3>Meeting Chat</h3><span class="chat-live">● Live</span></div>
+            </div>
+            <div id="raisedHandsBar" class="raised-hands-bar" hidden>
+              <strong>✋ Raised Hands: <span id="raisedHandCount">0</span></strong>
+              <div id="raisedHandsNames" class="raised-hands-names"></div>
+            </div>
+            <div class="chat-recipient">
+              <label for="chatRecipient">Send message to</label>
+              <select id="chatRecipient"><option value="everyone">Everyone (Public)</option></select>
+            </div>
+            <div id="chatMessages" class="chat-messages">
+              <div class="chat-empty">No messages yet. Start a conversation!</div>
+            </div>
+            <div id="chatImagePreview" class="chat-image-preview" hidden>
+              <img id="chatImageThumbnail" alt="Image Preview">
+              <span id="chatImageFilename"></span>
+              <button id="removeChatImageBtn" type="button">✕</button>
+            </div>
+            <form id="chatForm" class="chat-form">
+              <input id="chatImageInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+              <button id="attachImageBtn" type="button" title="Attach image">+</button>
+              <input id="chatInput" type="text" maxlength="2000" placeholder="Type a message..." autocomplete="off">
+              <button id="chatSendBtn" type="submit">Send</button>
+            </form>
             <p class="chat-privacy-note">Private messages are visible only to you and the recipient.</p>
-          </div>
-          <div id="requestsPanel" class="requests-panel" hidden>
-            <div class="requests-heading"><h3>Meeting requests</h3><p>Approve, reject or review later.</p></div>
-            <div id="hostPanel" hidden><h4>Waiting room requests</h4><div id="waitingList"><p>No pending requests</p></div><h4>Screen sharing requests</h4><div id="screenShareRequests"></div></div>
-            <p id="requestEmptyMessage" class="requests-empty">No pending requests right now.</p>
           </div>
         </aside>
       </div>
 
-      <!-- DESKTOP TOOLBAR / PHONE 5-BUTTON TOOLBAR -->
-      <div id="meetingControls" class="meeting-controls panel">
+      <div class="meeting-controls panel" id="meetingControls">
         <button id="micBtn" class="meeting-control" type="button"><span class="ms-control-icon"></span><span class="ms-control-label">Mute</span></button>
-        <button id="cameraBtn" class="meeting-control" type="button"><span class="ms-control-icon"></span><span class="ms-control-label">Stop video</span></button>
-        <button id="screenBtn" class="meeting-control" type="button"><span class="ms-control-icon"></span><span class="ms-control-label">Share screen</span></button>
-        <button id="toggleParticipantsBtn" class="meeting-control desktop-control" type="button" aria-expanded="false" aria-controls="meetingSidebar"><span class="ms-control-icon">♙</span><span class="ms-control-label">People</span></button>
-        <button id="toggleChatBtn" class="meeting-control" type="button" aria-expanded="false" aria-controls="meetingSidebar"><span class="ms-control-icon"></span><span class="ms-control-label">Chat</span></button>
-        <button id="toggleRequestsBtn" class="meeting-control desktop-control" type="button" hidden aria-expanded="false" aria-controls="meetingSidebar"><span class="ms-control-icon">🔔</span><span class="ms-control-label">Requests</span><span id="roomRequestCountToolbar" class="control-count" hidden>0</span></button>
-        <button id="raiseHandBtn" class="meeting-control desktop-control" type="button"><span class="ms-control-icon"></span><span class="ms-control-label">Raise hand</span></button>
-        <button id="moreBtn" class="meeting-control" type="button" aria-controls="meetingMoreMenu" aria-expanded="false"><span class="ms-control-icon">☰</span><span class="ms-control-label">More</span></button>
-        <button id="leaveBtn" class="meeting-control danger desktop-control" type="button"><span class="ms-control-icon"></span><span class="ms-control-label">Leave</span></button>
-      </div>
-
-      <div id="meetingMoreMenu" class="meeting-more-menu panel" hidden>
-        <h3>Meeting options</h3>
-        <button id="morePeopleBtn" type="button">♙ People</button>
-        <button id="moreHandBtn" type="button">✋ Raise / lower hand</button>
-        <button id="moreRequestsBtn" type="button" hidden>🔔 Requests</button>
-        <button id="moreSettingsBtn" type="button" hidden>⚙ Host settings</button>
-        <button id="moreAdjustTimeBtn" type="button" hidden>◷ Adjust meeting time</button>
-        <button id="moreInviteBtn" type="button">⧉ Copy invite link</button>
-        <button id="moreLeaveBtn" type="button" class="more-danger">↗ Leave meeting</button>
+        <button id="cameraBtn" class="meeting-control" type="button"><span class="ms-control-icon"></span><span class="ms-control-label">Stop Video</span></button>
+        <button id="screenBtn" class="meeting-control" type="button"><span class="ms-control-icon"></span><span class="ms-control-label">Share Screen</span></button>
+        <button id="raiseHandBtn" class="meeting-control" type="button"><span class="ms-control-icon"></span><span class="ms-control-label">Raise Hand</span></button>
+        <button id="toggleChatBtn" class="meeting-control" type="button"><span class="ms-control-icon"></span><span class="ms-control-label">Chat</span></button>
+        <button id="leaveBtn" class="meeting-control danger" type="button"><span class="ms-control-icon"></span><span class="ms-control-label">Leave</span></button>
       </div>
     </section>
 
-    <!-- CREATE MEETING SETTINGS -->
-    <div id="createSettingsModal" class="ms-room-modal" hidden>
-      <div class="ms-room-dialog" role="dialog" aria-modal="true" aria-labelledby="createSettingsTitle" tabindex="-1">
-        <div class="ms-dialog-heading"><h3 id="createSettingsTitle">⚙ Meeting settings</h3><button id="closeCreateSettingsBtn" class="ms-dialog-close" type="button" aria-label="Close settings">✕</button></div>
-        <p class="ms-control-placeholder">Set your duration and permissions before creating a room.</p>
-        <div class="ms-settings-tabs"><button id="createGeneralTab" class="ms-settings-tab is-active" type="button">General</button><button id="createPermissionsTab" class="ms-settings-tab" type="button">Permissions</button></div>
-        <div id="createGeneralFields" class="ms-setting-page">
-          <label for="meetingType">Meeting type</label><select id="meetingType"><option value="instant">Instant meeting</option><option value="scheduled">Scheduled meeting</option></select>
-          <div id="scheduledMeetingFields" class="v2-schedule-fields" hidden><label for="meetingDate">Meeting date</label><input id="meetingDate" type="date"><label for="meetingTime">Start time</label><input id="meetingTime" type="time"><p class="v2-settings-note">Times use your device's time zone.</p></div>
-          <label for="meetingDuration">Meeting duration</label><select id="meetingDuration"><option value="30">30 minutes</option><option value="60" selected>1 hour</option><option value="120">2 hours</option><option value="180">3 hours</option><option value="240">4 hours</option><option value="custom" data-custom="true">Custom minutes</option></select>
-          <div id="customDurationFields" class="ms-custom-duration" hidden><label for="meetingCustomDuration">Custom duration (5–1440 minutes)</label><input id="meetingCustomDuration" type="number" min="5" max="1440" step="1" value="90"></div>
-          <p class="v2-participant-limit">Maximum participants: <strong>10 (including host)</strong></p>
-        </div>
-        <div id="createPermissionFields" class="ms-setting-page" hidden>
-          <h4>Participant permissions</h4>
-          <div class="v2-permissions">
-            <label class="v2-permission"><span><strong>Microphone</strong><small>Participants can unmute</small></span><input id="setting-mic" type="checkbox" checked></label>
-            <label class="v2-permission"><span><strong>Camera</strong><small>Participants can turn on video</small></span><input id="setting-camera" type="checkbox" checked></label>
-            <label class="v2-permission"><span><strong>Screen sharing</strong><small>Share without host approval</small></span><input id="setting-share" type="checkbox"></label>
-            <label class="v2-permission"><span><strong>Meeting chat</strong><small>Send public/private messages and images</small></span><input id="setting-chat" type="checkbox" checked></label>
-            <label class="v2-permission"><span><strong>Raise hand</strong><small>Allow participants to raise hands</small></span><input id="setting-hand" type="checkbox" checked></label>
-            <label class="v2-permission"><span><strong>Waiting room</strong><small>Require host approval for entry</small></span><input id="setting-approval" type="checkbox" checked></label>
-            <label class="v2-permission"><span><strong>Automatic end</strong><small>End when meeting time expires</small></span><input id="setting-autoEnd" type="checkbox" checked></label>
-          </div>
-        </div>
-        <div class="ms-dialog-actions"><button id="saveCreateSettingsBtn" class="ms-dialog-primary" type="button">Save settings</button></div>
-      </div>
-    </div>
-
-    <!-- HOST SETTINGS DURING CALL -->
-    <div id="roomSettingsModal" class="ms-room-modal" hidden>
-      <div class="ms-room-dialog" role="dialog" aria-modal="true" aria-labelledby="roomSettingsTitle" tabindex="-1">
-        <div class="ms-dialog-heading"><h3 id="roomSettingsTitle">⚙ Host settings</h3><button id="closeRoomSettingsBtn" class="ms-dialog-close" type="button" aria-label="Close host settings">✕</button></div>
-        <p class="ms-control-placeholder">Only the host can change these permissions. Changes apply to everyone.</p>
-        <div class="v2-permissions">
-          <label class="v2-permission"><span><strong>Microphone</strong><small>Allow participants to unmute</small></span><input id="room-setting-mic" type="checkbox" checked></label>
-          <label class="v2-permission"><span><strong>Camera</strong><small>Allow participants to use video</small></span><input id="room-setting-camera" type="checkbox" checked></label>
-          <label class="v2-permission"><span><strong>Screen sharing</strong><small>Share without host approval</small></span><input id="room-setting-share" type="checkbox"></label>
-          <label class="v2-permission"><span><strong>Chat</strong><small>Allow public/private chat and images</small></span><input id="room-setting-chat" type="checkbox" checked></label>
-          <label class="v2-permission"><span><strong>Raise hand</strong><small>Allow hand raising</small></span><input id="room-setting-hand" type="checkbox" checked></label>
-          <label class="v2-permission"><span><strong>Waiting room</strong><small>Approve new participants before entry</small></span><input id="room-setting-approval" type="checkbox" checked></label>
-          <label class="v2-permission"><span><strong>Automatic end</strong><small>End the meeting when its time expires</small></span><input id="room-setting-autoEnd" type="checkbox" checked></label>
-        </div>
-        <div class="ms-dialog-actions"><button id="saveRoomSettingsBtn" class="ms-dialog-primary" type="button">Save settings</button></div>
-      </div>
-    </div>
-
-    <!-- ADD / REDUCE / CUSTOM MEETING TIME -->
-    <div id="extendMeetingModal" class="ms-room-modal" hidden>
-      <div class="ms-room-dialog ms-time-dialog" role="dialog" aria-modal="true" aria-labelledby="extendMeetingTitle" tabindex="-1">
-        <div class="ms-dialog-heading"><h3 id="extendMeetingTitle">◷ Adjust meeting time</h3><button id="closeExtendMeetingBtn" class="ms-dialog-close" type="button" aria-label="Close time adjustment">✕</button></div>
-        <p class="ms-control-placeholder">Add or reduce time. Everyone's countdown will update together.</p>
-        <div class="ms-time-current"><span>Current time remaining</span><strong id="timeCurrentValue">--:--:--</strong></div>
-        <label class="ms-time-label">1. What would you like to do?</label>
-        <div id="timeModeOptions" class="ms-time-modes" role="group" aria-label="Time adjustment direction"><button id="timeAddBtn" class="is-active" type="button" data-time-mode="add" aria-pressed="true">＋ Add time</button><button id="timeReduceBtn" type="button" data-time-mode="reduce" aria-pressed="false">− Reduce time</button></div>
-        <input id="timeModeInput" type="hidden" value="add">
-        <label class="ms-time-label">2. Choose minutes</label>
-        <div id="timePresetOptions" class="ms-time-presets" role="group" aria-label="Meeting time minutes"><button type="button" data-time-preset="5">5 min</button><button type="button" data-time-preset="15" class="is-active">15 min</button><button type="button" data-time-preset="30">30 min</button><button type="button" data-time-preset="60">60 min</button><button type="button" data-time-preset="custom">Custom</button></div>
-        <input id="extensionMinutes" type="hidden" value="15">
-        <div id="customExtensionFields" class="ms-custom-duration" hidden><label for="customExtensionMinutes">Custom minutes (1–1440)</label><input id="customExtensionMinutes" type="number" min="1" max="1440" step="1" value="10"></div>
-        <div class="ms-time-preview"><div><small>Before</small><strong id="timeBeforeValue">--:--:--</strong></div><span aria-hidden="true">→</span><div class="ms-time-after"><small>After</small><strong id="timePreviewValue">--:--:--</strong></div></div>
-        <p id="timeAdjustError" class="ms-time-error" aria-live="polite"></p>
-        <div class="ms-dialog-actions"><button id="cancelTimeAdjustBtn" class="secondary-btn" type="button">Cancel</button><button id="confirmExtendMeetingBtn" class="ms-dialog-primary" type="button">Apply time change</button></div>
-      </div>
-    </div>
-
-    <!-- JOIN / SHARE APPROVAL POPUP -->
-    <div id="requestPopup" class="ms-request-popup" role="alertdialog" aria-modal="false" aria-labelledby="requestPopupTitle" hidden>
-      <div class="ms-request-top"><span>🔔 New request</span><span id="requestPopupCounter"></span></div>
-      <h3 id="requestPopupTitle">Request pending</h3><p id="requestPopupDescription">Someone needs your approval.</p>
-      <div class="ms-request-actions"><button id="requestRejectBtn" class="ms-request-reject" type="button">Reject</button><button id="requestApproveBtn" class="ms-request-approve" type="button">Approve</button></div>
-      <button id="requestLaterBtn" class="ms-request-later" type="button">Review later</button>
-    </div>
-
-    <!-- FEATURES -->
     <section id="features" class="features-section" hidden>
-      <div class="page-heading"><span class="eyebrow">WHAT YOU CAN DO</span><h2>Everything for <span class="gradient-text">better meetings.</span></h2><p>Strong meeting features, made straightforward.</p></div>
+      <div class="page-heading">
+        <div class="eyebrow">WHAT MAKES US DIFFERENT</div>
+        <h2>Everything you need to <span class="gradient-text">meet better.</span></h2>
+        <p>MeetSpace makes virtual collaboration simple.</p>
+      </div>
       <div class="feature-grid">
-        <article class="feature-card panel"><div class="feature-icon purple">🎥</div><h3>Smart video gallery</h3><p>Clear, responsive layouts for up to ten people.</p></article>
-        <article class="feature-card panel"><div class="feature-icon pink">💬</div><h3>Public &amp; private chat</h3><p>Send messages and images to everyone or a guest.</p></article>
-        <article class="feature-card panel"><div class="feature-icon purple">🖥</div><h3>Screen sharing</h3><p>Present content with a focus on the shared screen.</p></article>
-        <article class="feature-card panel"><div class="feature-icon pink">🔒</div><h3>Waiting room</h3><p>Hosts approve entry and screen sharing requests.</p></article>
-        <article class="feature-card panel"><div class="feature-icon purple">◷</div><h3>Flexible meeting time</h3><p>Set duration and adjust minutes during calls.</p></article>
-        <article class="feature-card panel"><div class="feature-icon pink">⚙</div><h3>Host permissions</h3><p>Manage camera, microphone, chat and hand raising.</p></article>
+        <article class="feature-card panel"><div class="feature-icon purple">🎥</div><h3>Video Meetings</h3><p>Connect face-to-face with your team.</p></article>
+        <article class="feature-card panel"><div class="feature-icon pink">💬</div><h3>Private &amp; Public Chat</h3><p>Share messages and images.</p></article>
+        <article class="feature-card panel"><div class="feature-icon purple">🖥️</div><h3>Screen Sharing</h3><p>Present your real screen to everyone.</p></article>
+        <article class="feature-card panel"><div class="feature-icon pink">🛡️</div><h3>Secure Meetings</h3><p>Password protection and waiting room.</p></article>
+        <article class="feature-card panel"><div class="feature-icon purple">✋</div><h3>Raise Your Hand</h3><p>Ask to speak without interrupting.</p></article>
+        <article class="feature-card panel"><div class="feature-icon pink">🛡️</div><h3>Host Moderation</h3><p>Approve access, mute, and assign admin roles.</p></article>
       </div>
     </section>
 
-    <!-- HELP / SUPPORT -->
     <section id="support" class="support-section" hidden>
-      <div class="page-heading"><span class="eyebrow">HERE TO HELP</span><h2>MeetSpace <span class="gradient-text">Help.</span></h2><p>Everything you need to use your meeting confidently.</p></div>
-      <div class="help-grid">
-        <div class="help-item panel"><h3>How do I create a meeting?</h3><p>Choose Start meeting, sign in if needed, enter a password and create your room.</p></div>
-        <div class="help-item panel"><h3>How do I join?</h3><p>Enter the Meeting ID and password from your host. You may wait for approval.</p></div>
-        <div class="help-item panel"><h3>Where are People and Chat?</h3><p>Desktop: use the bottom toolbar to open the right panel. Phone: use the bottom sheet.</p></div>
-        <div class="help-item panel"><h3>How do I change meeting time?</h3><p>Hosts choose Adjust Time to add or reduce minutes, including a custom amount.</p></div>
+      <div class="page-heading">
+        <div class="eyebrow">WE'RE HERE TO HELP</div>
+        <h2>Need <span class="gradient-text">support?</span></h2>
+        <p>Questions or feedback about MeetSpace?</p>
       </div>
-      <div class="support-card panel"><h3>Developer and support</h3><a class="support-link" href="https://hamimkazi002.github.io/HamimKazi/" target="_blank" rel="noopener noreferrer">Visit developer portfolio ↗</a></div>
+      <div class="support-card panel">
+        <h3>MeetSpace Support</h3>
+        <div class="support-links">
+          <a class="support-link" href="https://hamimkazi002.github.io/HamimKazi/" target="_blank" rel="noopener noreferrer">
+            <span class="support-link-icon">◈</span>
+            <span class="support-link-text"><strong>Developer Portfolio</strong><small>Explore the portfolio</small></span>
+            <span class="support-link-arrow">↗</span>
+          </a>
+        </div>
+      </div>
     </section>
 
     <p id="status" role="status" aria-live="polite">Welcome to MeetSpace.</p>
   </main>
 
-  <footer id="siteFooter" class="site-footer"><span><strong>Meet<span class="brand-accent">Space</span></strong> — A better space to connect.</span><span>Made with care ✦</span></footer>
+  <footer class="site-footer">
+    <span><strong>Meet<span class="brand-accent">Space</span></strong> — A better space to connect.</span>
+    <span>Made with care ✦</span>
+  </footer>
 
-  <!-- PHONE-ONLY BOTTOM NAVIGATION (HIDDEN DURING CALLS) -->
-  <nav id="mobileBottomNav" class="mobile-bottom-nav" aria-label="Phone navigation">
-    <button id="mobileHomeBtn" type="button" data-page="home"><span>⌂</span>Home</button>
-    <button id="mobileJoinBtn" type="button" data-page="join"><span>↗</span>Join</button>
-    <button id="mobileHelpBtn" type="button" data-page="support"><span>?</span>Help</button>
-  </nav>
-
-  <!-- FIREBASE / SOCKET.IO / MAIN SCRIPT -->
   <script src="/socket.io/socket.io.js"></script>
   <script src="/firebase-config.js"></script>
   <script type="module" src="/firebase-auth.js"></script>
   <script src="/script.js"></script>
-
-  <!-- SELF-CONTAINED PASSWORD VISIBILITY: WORKS ON BOTH FORMS -->
   <script>
-    document.addEventListener("click", event => {
-      const button = event.target.closest("[data-password-toggle]");
-      if (!button) return;
-      const input = document.getElementById(button.dataset.passwordToggle);
-      if (!input) return;
-      const isVisible = input.type === "password";
-      input.type = isVisible ? "text" : "password";
-      button.setAttribute("aria-pressed", String(isVisible));
-      button.setAttribute("aria-label", isVisible ? "Hide password" : "Show password");
-      const label = button.querySelector(".password-eye-word");
-      if (label) label.textContent = isVisible ? "Hide" : "Show";
-      const icon = button.querySelector(".password-eye-icon");
-      if (icon) icon.textContent = isVisible ? "◎" : "◉";
-    });
+    /* Approved UI navigation only. Original script.js handles every
+       meeting, WebRTC, chat, host and screen-sharing operation. */
+    (() => {
+      "use strict";
+
+      const el = id => document.getElementById(id);
+      const meeting = el("meetingSection");
+      const waiting = el("waitingSection");
+      const home = el("home");
+      const features = el("features");
+      const support = el("support");
+      const hero = document.querySelector(".landing-hero");
+      const login = el("loginSection");
+      const roomCards = el("homeSection");
+
+      const invite = new URLSearchParams(location.search).get("room");
+      const isInvite = /^[a-f0-9]{10}$/i.test(invite || "");
+      let page = isInvite ? "create" : "home";
+
+      const themeToggle = el("themeToggle");
+
+      function applyTheme(mode) {
+        const light = mode === "light";
+        document.body.classList.toggle("light-mode", light);
+        themeToggle.textContent = light ? "🌙 Dark Mode" : "☀️ Light Mode";
+      }
+
+      let savedTheme = "dark";
+      try {
+        savedTheme = localStorage.getItem("meetspace-theme") || "dark";
+      } catch {}
+
+      applyTheme(savedTheme);
+
+      themeToggle.addEventListener("click", () => {
+        const mode = document.body.classList.contains("light-mode")
+          ? "dark" : "light";
+        try {
+          localStorage.setItem("meetspace-theme", mode);
+        } catch {}
+        applyTheme(mode);
+      });
+
+      document.querySelectorAll("[data-password-toggle]").forEach(button => {
+        const input = el(button.dataset.passwordToggle);
+        if (!input) return;
+        button.textContent = "◉";
+
+        button.addEventListener("click", () => {
+          const show = input.type === "password";
+          input.type = show ? "text" : "password";
+          button.textContent = show ? "◎" : "◉";
+          button.setAttribute(
+            "aria-label", show ? "Hide password" : "Show password"
+          );
+        });
+      });
+
+      if (isInvite) {
+        document.body.dataset.invite = "true";
+        el("roomInput").value = invite;
+        el("roomInput").readOnly = true;
+        const title = document.querySelector("#homeSection .page-heading h2");
+        if (title) title.textContent = "Join invited meeting";
+      }
+
+      function signedIn() {
+        return Boolean(window.meetspaceAuth?.auth?.currentUser);
+      }
+
+      function refreshView() {
+        const active = !meeting.hidden;
+        const waitingNow = !waiting.hidden;
+
+        document.body.dataset.view = active
+          ? "meeting" : waitingNow ? "waiting" : page;
+
+        el("topbar").hidden = active;
+        home.hidden = active || waitingNow ||
+          (page !== "home" && page !== "create");
+        features.hidden = active || waitingNow || page !== "features";
+        support.hidden = active || waitingNow || page !== "support";
+        hero.hidden = page !== "home" || isInvite;
+
+        if (page === "create" && !active && !waitingNow) {
+          const loggedIn = signedIn();
+          login.hidden = loggedIn;
+          roomCards.hidden = !loggedIn;
+        }
+
+        document.querySelectorAll("[data-page]").forEach(link =>
+          link.classList.toggle("active", link.dataset.page === page)
+        );
+      }
+
+      function navigate(next) {
+        if (!meeting.hidden || !waiting.hidden || isInvite) return;
+        page = next;
+        refreshView();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      document.querySelectorAll("[data-page]").forEach(link =>
+        link.addEventListener("click", event => {
+          event.preventDefault();
+          navigate(link.dataset.page);
+        })
+      );
+
+      el("brandHome").addEventListener("click", event => {
+        event.preventDefault();
+        navigate("home");
+      });
+
+      /* Keep the original chat toggle logic unchanged. */
+      const peopleTab = el("showParticipantsTab");
+      const chatTab = el("showChatTab");
+      const toggleChat = el("toggleChatBtn");
+
+      function reflectTabs() {
+        const showingChat = !el("chatPanel").hidden;
+        el("participantsPanel").hidden = showingChat;
+        peopleTab.classList.toggle("is-active", !showingChat);
+        chatTab.classList.toggle("is-active", showingChat);
+      }
+
+      peopleTab.addEventListener("click", () => {
+        if (!el("chatPanel").hidden) toggleChat.click();
+        reflectTabs();
+      });
+
+      chatTab.addEventListener("click", () => {
+        if (el("chatPanel").hidden) toggleChat.click();
+        reflectTabs();
+      });
+
+      toggleChat.addEventListener("click", reflectTabs);
+
+      if (typeof chatVisible !== "undefined" && chatVisible) {
+        toggleChat.click();
+      }
+      reflectTabs();
+
+      new MutationObserver(refreshView).observe(meeting, {
+        attributes: true,
+        attributeFilter: ["hidden"]
+      });
+
+      new MutationObserver(refreshView).observe(waiting, {
+        attributes: true,
+        attributeFilter: ["hidden"]
+      });
+
+      if (isInvite) refreshView();
+    })();
   </script>
 </body>
 </html>
