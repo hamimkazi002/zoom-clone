@@ -112,7 +112,7 @@ const icons = {
     stroke-linecap="round" stroke-linejoin="round">
     <path d="m2 2 20 20"/>
     <path d="M10 5h5a2 2 0 0 1 2 2v3"/>
-    <path d="M17 14v3a2 2 0 0 1 2 2H4a2 2 0 0 1-2-2V7"/>
+    <path d="M17 14v3a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7"/>
     <path d="m17 10 5-3v10l-5-3"/>
   </svg>`,
 
@@ -121,7 +121,7 @@ const icons = {
     stroke-linecap="round" stroke-linejoin="round">
     <rect x="2" y="3" width="20" height="15" rx="2"/>
     <path d="M8 22h8M12 18v4"/>
-    <path d="m9 12 3-3 3 3m-3-3v6"/>
+    <path d="m9 12 3-3 3 3M12 9v6"/>
   </svg>`,
 
   hand: `<svg viewBox="0 0 24 24" fill="none"
@@ -718,7 +718,6 @@ async function startMedia() {
     });
   }
 }
-
 
 /* ==========================================
    WEBRTC CONNECTIONS
@@ -1384,7 +1383,6 @@ socket.on("hands-updated", (data) => {
   updateRaisedHandsUI();
   renderParticipants(participants);
 });
-
 
 /* ==========================================
    PUBLIC + PRIVATE CHAT

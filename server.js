@@ -389,7 +389,10 @@ io.on("connection", (socket) => {
     socket.id
   );
 
- 
+  /* ========================================
+     CREATE ROOM
+  ======================================== */
+
   socket.on("create-room", (data = {}, callback) => {
     if (socket.data.roomId) {
       return fail(
@@ -850,6 +853,10 @@ io.on("connection", (socket) => {
     }
   );
 
+  /* ========================================
+     REJECT SCREEN SHARE
+  ======================================== */
+
   socket.on(
     "reject-screen-share",
     (targetId, callback) => {
@@ -1277,3 +1284,4 @@ app.get("/api/ice-servers", async (req, res) => {
     });
   }
 });
+
